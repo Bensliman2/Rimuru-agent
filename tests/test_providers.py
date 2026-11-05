@@ -175,7 +175,8 @@ def test_the_settings_api_only_answers_this_computer(tmp_path, monkeypatch):
 
     with TestClient(create_app(speed=50)) as client:
         page = client.get("/inside")
-        assert page.status_code == 200 and "How Rimuru works" in page.text
+        assert page.status_code == 200
+        assert all(f'data-view="{v}"' in page.text for v in ("rimuru", "clones", "watchdog"))
         assert client.get("/api/models", headers={"host": "evil.example"}).status_code == 403
         assert client.post("/api/models", json=body,
                            headers={"origin": "http://evil.example"}).status_code == 403

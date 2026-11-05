@@ -62,6 +62,7 @@
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z" fill="currentColor"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5zM5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
   <symbol id="i-route" viewBox="0 0 24 24"><path d="M5 6h7a4 4 0 0 1 0 8H9a3 3 0 0 0 0 6h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="5" cy="6" r="2" fill="currentColor"/><path d="M17 17l2.5 3-2.5 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="13" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="13" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
 </svg>
 
 <header class="bar">
@@ -87,111 +88,192 @@
   </div>
 </header>
 
+<div class="views-bar">
+  <nav class="views" id="views" role="tablist" aria-label="Views">
+    <button role="tab" data-view="overview" class="on"><svg><use href="#i-grid"/></svg>Overview</button>
+    <button role="tab" data-view="rimuru"><svg class="tab-mark"><use href="#mark-rimuru"/></svg>Rimuru</button>
+    <button role="tab" data-view="clones"><svg class="tab-mark"><use href="#mark-clone"/></svg>Clones<span class="tab-badge" id="badge-clones" hidden></span></button>
+    <button role="tab" data-view="watchdog"><svg><use href="#i-eye"/></svg>Watchdog</button>
+    <button role="tab" data-view="messages"><svg><use href="#i-funnel"/></svg>Messages</button>
+    <button role="tab" data-view="memory"><svg><use href="#i-book"/></svg>Memory</button>
+    <button role="tab" data-view="practice"><svg><use href="#i-play"/></svg>Practice runs<span class="tab-dot" id="badge-practice" hidden></span></button>
+  </nav>
+</div>
+
 <main class="hood">
-  <section class="hood-intro">
-    <h1>How Rimuru works, live</h1>
-    <p>You talk to one assistant, Rimuru. Behind it, <b>clones</b> do the work, each on one
-      job, and a <b>watchdog</b> makes sure they keep moving. This page shows what came in,
-      what Rimuru decided, and who did what. Click anything for the full story.</p>
-  </section>
 
-  <section class="team" id="team" aria-label="Who is working"></section>
-
-  <section class="block">
-    <div class="block-head">
-      <h2>What came in</h2>
-      <span class="hint-icon" tabindex="0" aria-label="About this">
-        <svg><use href="#i-info"/></svg>
-        <span class="tip">Every message from every channel arrives here first. Simple rules
-          drop the obvious noise for free; only what is left is judged by the AI filter.
-          Your own messages in the chat always go straight to Rimuru.</span>
-      </span>
+  <!-- OVERVIEW -->
+  <section class="view on" id="view-overview" role="tabpanel">
+    <p class="view-intro">You talk to one assistant, <b>Rimuru</b>. Behind it, <b>clones</b> do the
+      work, one job each, and a <b>watchdog</b> makes sure they keep moving. Click a card - or a
+      tab above - to see each one up close.</p>
+    <div class="team" id="team"></div>
+    <section class="block">
+      <div class="block-head"><h2>What came in</h2>
+        <button class="ghost small" data-go="messages">See every message</button></div>
+      <div class="flow" id="flow"></div>
+    </section>
+    <div class="hood-grid even">
+      <section class="block">
+        <div class="block-head"><h2>Latest</h2></div>
+        <div class="feed scroll-sm" id="feed-overview"></div>
+      </section>
+      <section class="block">
+        <div class="block-head"><h2>Models and cost</h2>
+          <a class="ghost small" href="/#models">Change models</a></div>
+        <div class="models-now" id="models-now"></div>
+        <h3 class="mini">Tokens used so far</h3>
+        <div class="cost" id="cost"></div>
+        <p class="muted small">Most of what is read comes from the provider's cache, which is
+          cheaper. The noise filter's calls are not counted yet.</p>
+      </section>
     </div>
-    <div class="flow" id="flow"></div>
   </section>
 
-  <div class="hood-grid">
-    <section class="block feed-block">
-      <div class="block-head">
-        <h2>Live</h2>
-        <div class="filters" id="feed-filters" role="tablist" aria-label="Show">
-          <button data-f="all" class="on">Everything</button>
-          <button data-f="decide">Decisions</button>
-          <button data-f="clone">Clones</button>
-          <button data-f="say">What it said</button>
-          <button data-f="filter">Filter</button>
-        </div>
+  <!-- RIMURU -->
+  <section class="view" id="view-rimuru" role="tabpanel">
+    <div class="split">
+      <div class="col">
+        <section class="block">
+          <div class="who-head big">
+            <span id="rimuru-mark"></span>
+            <div><h2>Rimuru</h2><p class="muted">Talks with you and hands out the work. It has
+              no tools to do the work itself, so it always delegates to a clone.</p></div>
+          </div>
+          <dl class="facts" id="rimuru-facts"></dl>
+        </section>
+        <section class="block">
+          <div class="block-head"><h2>What it decided and said</h2></div>
+          <div class="feed scroll" id="feed-rimuru"></div>
+        </section>
       </div>
-      <div class="feed" id="feed" aria-live="polite"></div>
-    </section>
-
-    <div class="hood-side">
-      <section class="block">
-        <div class="block-head"><h2>Jobs</h2><span class="count" id="jobs-count"></span></div>
-        <div class="list" id="jobs"></div>
-      </section>
-      <section class="block">
-        <div class="block-head">
-          <h2>Conversations</h2>
-          <span class="hint-icon" tabindex="0" aria-label="About conversations">
-            <svg><use href="#i-info"/></svg>
-            <span class="tip">Messages about the same thing - a chat topic, a pull request -
-              are grouped into one conversation. A clone working on it follows the
-              conversation, so follow-ups reach it directly.</span>
-          </span>
+      <section class="block col-wide">
+        <div class="block-head"><h2>Its thoughts, turn by turn</h2>
+          <span class="hint-icon" tabindex="0" aria-label="About turns"><svg><use href="#i-info"/></svg>
+            <span class="tip">Each turn is one call to the AI: what Rimuru was given (your
+              messages, reports from clones), how it reasoned, and what it did. Newest first.</span></span>
         </div>
-        <div class="list" id="threads"></div>
+        <div class="scroll" id="rimuru-turns"></div>
       </section>
     </div>
-  </div>
+  </section>
 
-  <div class="hood-grid even">
+  <!-- CLONES -->
+  <section class="view" id="view-clones" role="tabpanel">
+    <div class="split">
+      <div class="col">
+        <section class="block">
+          <div class="block-head"><h2>Clones</h2><span class="count" id="clones-count"></span></div>
+          <div class="list scroll" id="clone-list"></div>
+        </section>
+        <section class="block">
+          <div class="block-head"><h2>Conversations</h2>
+            <span class="hint-icon" tabindex="0" aria-label="About conversations"><svg><use href="#i-info"/></svg>
+              <span class="tip">Messages about the same thing - a chat topic, a pull request -
+                form one conversation. A clone working on it follows the conversation, so
+                follow-ups reach it directly.</span></span>
+          </div>
+          <div class="list scroll-sm" id="threads"></div>
+        </section>
+      </div>
+      <section class="block col-wide">
+        <div class="clone-head" id="clone-head"></div>
+        <div class="scroll" id="clone-turns"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- WATCHDOG -->
+  <section class="view" id="view-watchdog" role="tabpanel">
+    <div class="split">
+      <div class="col">
+        <section class="block">
+          <div class="who-head big">
+            <span class="who-icon"><svg><use href="#i-eye"/></svg></span>
+            <div><h2>Watchdog</h2><p class="muted">Checks that clones make progress, not just
+              that they are alive, and nudges the ones that are stuck. When nothing is
+              running it rests and costs nothing.</p></div>
+          </div>
+          <dl class="facts" id="wd-facts"></dl>
+          <form class="ask" id="wd-form">
+            <input id="wd-q" placeholder="Ask it, e.g. why did a job fail?" aria-label="Question for the watchdog">
+            <button class="ghost" type="submit">Ask</button>
+          </form>
+          <div class="wd-answers" id="wd-answers"></div>
+        </section>
+        <section class="block">
+          <div class="block-head"><h2>What it did</h2></div>
+          <div class="feed scroll-sm" id="feed-watchdog"></div>
+        </section>
+      </div>
+      <section class="block col-wide">
+        <div class="block-head"><h2>Its notes, turn by turn</h2></div>
+        <div class="scroll" id="wd-turns"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- MESSAGES -->
+  <section class="view" id="view-messages" role="tabpanel">
     <section class="block">
-      <div class="block-head"><h2>Memory</h2></div>
-      <h3 class="mini">Things Rimuru chose to remember</h3>
-      <ul class="notes" id="notes"></ul>
-      <h3 class="mini">Look anything up</h3>
-      <p class="muted">Every message, conversation, job and clone has a short ID such as
-        <code>tsk_1a2b3c4d</code>. Rimuru looks things up by ID instead of keeping
-        everything in mind. Click any ID on this page, or paste one:</p>
-      <form class="lookup" id="recall-form">
-        <input id="recall-id" placeholder="Paste an ID" spellcheck="false" aria-label="ID to look up">
-        <button class="ghost" type="submit"><svg><use href="#i-search"/></svg>Look up</button>
-      </form>
-      <pre class="recall-out" id="recall-out" hidden></pre>
+      <div class="block-head"><h2>What came in</h2>
+        <span class="hint-icon" tabindex="0" aria-label="About this"><svg><use href="#i-info"/></svg>
+          <span class="tip">Every message from every channel arrives here first. Simple rules
+            drop the obvious noise for free; only what is left is judged by the AI filter.
+            Your own messages in the chat always go straight to Rimuru.</span></span>
+      </div>
+      <div class="flow" id="flow-big"></div>
     </section>
+    <div class="hood-grid">
+      <section class="block">
+        <div class="block-head"><h2>What happened to each message</h2></div>
+        <div class="feed scroll" id="feed-messages"></div>
+      </section>
+      <section class="block">
+        <div class="block-head"><h2>Rules for group chats</h2></div>
+        <p class="muted">Your own chat with Rimuru always gets through. For group channels you
+          decide what Rimuru listens to.</p>
+        <div class="rules" id="channel-rules"></div>
+        <h3 class="mini">What the AI filter lets through</h3>
+        <p class="muted">Messages that pass the rules are judged against these instructions.
+          Change them in plain words; they apply from the next message.</p>
+        <div class="policies" id="policies"></div>
+        <form class="lookup" id="policy-form">
+          <input id="policy-text" placeholder="Add one, e.g. Act when someone asks for a release" aria-label="New instruction">
+          <button class="ghost" type="submit">Add</button>
+        </form>
+      </section>
+    </div>
+  </section>
 
-    <section class="block">
-      <div class="block-head"><h2>Rules for group chats</h2></div>
-      <p class="muted">Your own chat with Rimuru always gets through. For group channels you
-        decide what Rimuru listens to.</p>
-      <div class="rules" id="channel-rules"></div>
-      <h3 class="mini">What the AI filter lets through</h3>
-      <p class="muted">Messages that pass the rules are judged against these instructions.
-        Change them in plain words; they apply from the next message.</p>
-      <div class="policies" id="policies"></div>
-      <form class="lookup" id="policy-form">
-        <input id="policy-text" placeholder="Add an instruction, e.g. Act when someone asks for a release" aria-label="New instruction">
-        <button class="ghost" type="submit">Add</button>
-      </form>
-    </section>
-  </div>
+  <!-- MEMORY -->
+  <section class="view" id="view-memory" role="tabpanel">
+    <div class="hood-grid even">
+      <section class="block">
+        <div class="block-head"><h2>Things Rimuru chose to remember</h2></div>
+        <ul class="notes" id="notes"></ul>
+      </section>
+      <section class="block">
+        <div class="block-head"><h2>Look anything up</h2></div>
+        <p class="muted">Every message, conversation, job and clone has a short ID such as
+          <code>tsk_1a2b3c4d</code>. Rimuru looks things up by ID instead of keeping
+          everything in mind - and so can you. Click any ID in these views, or paste one:</p>
+        <form class="lookup" id="recall-form">
+          <input id="recall-id" placeholder="Paste an ID" spellcheck="false" aria-label="ID to look up">
+          <button class="ghost" type="submit"><svg><use href="#i-search"/></svg>Look up</button>
+        </form>
+        <pre class="recall-out" id="recall-out" hidden></pre>
+      </section>
+    </div>
+  </section>
 
-  <div class="hood-grid even">
-    <section class="block">
-      <div class="block-head"><h2>Models and cost</h2>
-        <a class="ghost small" href="/#models">Change models</a></div>
-      <div class="models-now" id="models-now"></div>
-      <h3 class="mini">Tokens used so far</h3>
-      <div class="cost" id="cost"></div>
-      <p class="muted small">Most of what is read comes from the provider's cache, which is
-        cheaper. The noise filter's calls are not counted yet.</p>
-    </section>
-
-    <section class="block">
+  <!-- PRACTICE -->
+  <section class="view" id="view-practice" role="tabpanel">
+    <section class="block narrow">
       <div class="block-head"><h2>Practice runs</h2></div>
-      <p class="muted">Try Rimuru on a made-up workload: messages come from a script, not
-        from real people. Good for seeing the filter and the clones at work.</p>
+      <p class="muted">Try Rimuru on a made-up workload: the messages come from a script, not
+        from real people. Start one, then watch the other tabs - the filter dropping noise,
+        Rimuru deciding, clones at work.</p>
       <div class="practice-now" id="practice-now"></div>
       <div class="practice" id="practice"></div>
       <label class="speed">Speed
@@ -203,22 +285,8 @@
         <span class="muted small">Speeds up the messages and the pretend jobs, not the AI.</span>
       </label>
     </section>
-  </div>
+  </section>
 </main>
-
-<!-- transcripts -->
-<div class="scrim" id="scrim" hidden></div>
-<section class="panel" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
-  <header class="panel-head">
-    <span class="panel-mark" id="drawer-mark"></span>
-    <div class="panel-titles">
-      <h2 id="drawer-title"></h2>
-      <div class="panel-sub" id="drawer-sub"></div>
-    </div>
-    <button class="icon-btn" id="drawer-close" aria-label="Close"><svg><use href="#i-x"/></svg></button>
-  </header>
-  <div class="panel-body" id="drawer-body"></div>
-</section>
 
 <script src="/static/inside.js"></script>
 </body>

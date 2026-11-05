@@ -70,18 +70,18 @@ only use it knowingly.
 
 ## Under the hood
 
-**Under the hood** (the link at the top of the app) shows how Rimuru works, live,
-in the same plain language as the chat:
+**Under the hood** (the link at the top of the app) shows how Rimuru works, live, in
+the same plain language as the chat - one view at a time:
 
-- **The team** - Rimuru, the clones and the watchdog: what each is doing, which model
-  it uses, and its full transcript a click away ("Read its thoughts").
-- **What came in** - every message, how many simple rules dropped, how many the AI
-  filter judged, and how many reached Rimuru or went straight to a clone.
-- **Live** - each decision and action as a sentence, as it happens.
-- **Jobs and conversations**, **memory** (notes, and a lookup for any ID), **rules for
-  group chats** (what Rimuru listens to, editable in plain words), **models and
-  cost**, and **practice runs**: scripted workloads - a busy team chat, a burst, a
-  quiet day, two coding exercises - to watch it all work without real people.
+| View | What you see |
+|---|---|
+| Overview | Rimuru, the clones and the watchdog at a glance; what came in; the latest events; models and cost |
+| Rimuru | what it is doing, what it decided and said, and its thoughts turn by turn |
+| Clones | every clone with its little slime; pick one to see its job, its commands and every turn |
+| Watchdog | its checks and interventions, its notes - and a box to ask it why something failed |
+| Messages | what happened to every incoming message, and the rules for group chats, editable in plain words |
+| Memory | the notes Rimuru keeps, and a lookup for any ID |
+| Practice runs | scripted workloads - a busy team chat, a burst, a quiet day, two coding exercises |
 
 Five modules, each a section of the article:
 

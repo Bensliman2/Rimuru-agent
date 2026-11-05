@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 
 from ..models import Usage
-from .base import LLMClient, LLMResponse, Msg, ToolCall, ToolSpec
+from .base import LLMClient, LLMResponse, Msg, ProviderAccountError, ToolCall, ToolSpec, account_problem
 
 _GATES: dict[tuple[int, int], asyncio.Semaphore] = {}
 log = logging.getLogger("rimuru.llm")
@@ -161,6 +161,13 @@ class OpenAICompatClient(LLMClient):
                 await asyncio.sleep(backoff)
                 continue
 
+            if response.status_code >= 400:
+                # Out of credit, or the key refused: no retry helps, and the person
+                # has to be told (found in real use: a 429 that meant "recharge").
+                problem = account_problem(response.status_code, response.text)
+                if problem:
+                    raise ProviderAccountError(problem, self.provider_label or
+                                               httpx.URL(self.base_url).host, response.text[:300])
             if response.status_code == 429 or response.status_code >= 500:
                 last_error = f"HTTP {response.status_code}: {response.text[:200]}"
                 log.warning("%s: HTTP %d, retrying (attempt %d/%d)", self.model,

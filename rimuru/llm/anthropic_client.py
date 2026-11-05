@@ -11,7 +11,7 @@ import asyncio
 from typing import Any
 
 from ..models import Usage
-from .base import LLMClient, LLMResponse, Msg, ToolCall, ToolSpec
+from .base import LLMClient, LLMResponse, Msg, ProviderAccountError, ToolCall, ToolSpec, account_problem
 
 
 class AnthropicClient(LLMClient):
@@ -74,6 +74,10 @@ class AnthropicClient(LLMClient):
                 raw = await self._client.messages.create(**payload)
                 break
             except Exception as exc:  # transient API failure: the Watchdog also sees these
+                problem = account_problem(getattr(exc, "status_code", None), str(exc))
+                if problem:
+                    raise ProviderAccountError(problem, self.provider_label or "Claude (Anthropic)",
+                                               str(exc)[:300]) from exc
                 last_error = exc
                 if attempt == 2:
                     raise

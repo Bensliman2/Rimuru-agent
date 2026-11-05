@@ -68,3 +68,37 @@ class LLMClient(Protocol):
         role: str = "worker",
     ) -> LLMResponse:
         ...
+
+
+class ProviderAccountError(RuntimeError):
+    """The provider refuses because of the account, not the request: it is out of
+    credit, or the key is not accepted. Retrying at once cannot help - the person
+    has to act - so the app must tell them, and keep trying quietly meanwhile."""
+
+    def __init__(self, reason: str, provider: str, detail: str = "") -> None:
+        self.reason = reason                       # "credit" | "key"
+        self.provider = provider or "The AI provider"
+        self.detail = detail
+        super().__init__(f"{self.provider}: {reason} - {detail[:300]}")
+
+    def plain(self) -> str:
+        if self.reason == "credit":
+            return f"{self.provider} says the account is out of credit"
+        return f"{self.provider} did not accept the API key"
+
+
+_CREDIT = ("insufficient balance", "insufficient_quota", "exceeded_current_quota",
+           "exceeded your current quota", "credit balance", "recharge", "payment required",
+           "out of credit", "billing details")
+_KEY = ("invalid api key", "invalid_api_key", "incorrect api key", "invalid authentication",
+        "authentication", "unauthorized", "api key")
+
+
+def account_problem(status: int | None, text: str) -> str | None:
+    """'credit' or 'key' when an API error is about the account, else None."""
+    low = (text or "").lower()
+    if status == 402 or any(k in low for k in _CREDIT):
+        return "credit"
+    if status == 401 or (status == 403 and any(k in low for k in _KEY)):
+        return "key"
+    return None

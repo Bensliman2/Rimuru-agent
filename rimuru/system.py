@@ -31,6 +31,7 @@ from .llm import build_client, catalog
 from .llm.base import Msg
 from .models import TERMINAL, Trigger
 from .recall import describe_graph
+from .sessions import DEFAULT as DEFAULT_SESSION, title_from
 from .router.filtering import EventFilter
 from .router.routing import EventRouter
 from .router.session import RouterAgent
@@ -118,6 +119,13 @@ class RimuruSystem:
         # --- local simulation harness ---
         self.sim = SimRunner(bus=self.bus, ingest=self.ingest, speed=speed)
 
+        # When the provider refuses the account (out of credit, key refused): the
+        # model cannot speak, so the app itself tells the person - once per session.
+        self.blocked: dict[str, dict[str, Any]] = {}
+        self._told: set[tuple[str, str]] = set()
+        self.bus.on("provider.blocked", self._on_provider_blocked)
+        self.bus.on("provider.recovered", self._on_provider_recovered)
+
         # Whatever was mid-flight when the process last died.
         self.recovered = self._mark_interrupted()
 
@@ -170,6 +178,54 @@ class RimuruSystem:
         self.bus.emit("models.changed", demo=demo, detail=self.provider_note)
 
     # ------------------------------------------------------------------ #
+    # the provider refuses the account
+    # ------------------------------------------------------------------ #
+    TOP_UP = {"Kimi (Moonshot)": "platform.moonshot.ai", "Claude (Anthropic)": "console.anthropic.com",
+              "OpenAI": "platform.openai.com", "DeepSeek": "platform.deepseek.com"}
+
+    def _chat_of(self, session_id: str) -> str | None:
+        """The chat session a loop is working for, if it works for one."""
+        if session_id == self.router.session.id:
+            thread = self.store.threads.get(self.router.latest_console_thread or "")
+        else:
+            agent = self.store.sessions.get(session_id)
+            task = self.store.tasks.get((agent.task_id if agent else None) or "")
+            thread = self.store.threads.get((task.thread_id if task else None) or "")
+        if thread is None or thread.channel not in self.config.conversation_channels:
+            return None
+        return thread.key
+
+    def _on_provider_blocked(self, event: dict[str, Any]) -> None:
+        provider = event.get("provider") or "The AI provider"
+        self.blocked.setdefault(provider, {"reason": event.get("reason"),
+                                           "detail": event.get("detail"), "since": event["ts"]})
+        if event.get("role") not in {"router", "worker"}:
+            return
+        key = self._chat_of(event.get("session_id", ""))
+        if key is None or (provider, key) in self._told:
+            return
+        self._told.add((provider, key))
+        if event.get("reason") == "credit":
+            where = self.TOP_UP.get(provider)
+            text = (f"I can't think right now: {provider} says your account is out of credit. "
+                    f"Top it up{f' at {where}' if where else ''}, and I will carry on by myself - "
+                    f"no need to ask again.")
+        else:
+            text = (f"I can't think right now: {provider} is not accepting the API key. Check it "
+                    f"with the Models button, and I will carry on by myself.")
+        self.store.add_chat("rimuru", text, chat=key, notice="blocked")
+
+    def _on_provider_recovered(self, event: dict[str, Any]) -> None:
+        provider = event.get("provider") or "The AI provider"
+        if self.blocked.pop(provider, None) is None:
+            return
+        told = sorted(k for p, k in self._told if p == provider)
+        self._told = {(p, k) for p, k in self._told if p != provider}
+        for key in told:
+            self.store.add_chat("rimuru", f"{provider} is working again - carrying on where I left off.",
+                                chat=key, notice="recovered")
+
+    # ------------------------------------------------------------------ #
     # injection bridges used by the EventRouter
     # ------------------------------------------------------------------ #
     def _inject_router(self, text: str, trigger_id: str | None = None) -> None:
@@ -178,6 +234,10 @@ class RimuruSystem:
         trigger = self.store.triggers.get(trigger_id or "")
         from_person = trigger is not None and (
             trigger.kind == "human_direct" or trigger.channel in self.config.conversation_channels)
+        if from_person and trigger.channel in self.config.conversation_channels:
+            # "console" in a reply means the session that wrote last.
+            self.router.latest_console_thread = trigger.thread_id
+            self.router.latest_console_ts = time.time()
         self.router.loop.inject(text, kind="human" if from_person else "event",
                                 trigger_id=trigger_id)
 
@@ -261,7 +321,7 @@ class RimuruSystem:
                         f"it back up.")
                 notes.append(f'[{task.id}] "{task.title}" - picked back up by a new clone')
             if in_chat:
-                self.store.add_chat("rimuru", said)
+                self.store.add_chat("rimuru", said, chat=thread.key)
             self.bus.emit("task.recovered", task_id=task.id, resumed=task.status != "failed")
 
         # The Router's own working context did not survive the restart. Seed it
@@ -321,10 +381,11 @@ class RimuruSystem:
             author=author,
             kind="human_direct",
             content=text,
-            meta={"thread_title": "direct line"},
+            # A new session is named after the first thing the person asked.
+            meta={"thread_title": "direct line" if thread_key == DEFAULT_SESSION else title_from(text)},
         )
-        if channel == "console":
-            self.store.add_chat("user", text, trigger_id=trigger.id)
+        if channel in self.config.conversation_channels:
+            self.store.add_chat("user", text, trigger_id=trigger.id, chat=thread_key)
         await self.ingest(trigger)
         return trigger
 
@@ -360,6 +421,7 @@ class RimuruSystem:
                 for role in catalog.ROLES
             },
             "models_note": self.provider_note,
+            "blocked": [{"provider": p, **info} for p, info in self.blocked.items()],
             "cut_ins": self.router.loop.cut_ins,
             "bash_enabled": self.config.enable_bash,
             "shell": {"kind": self.shell.kind, "ready": self.shell.ready,

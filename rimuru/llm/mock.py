@@ -244,7 +244,8 @@ class MockClient(LLMClient):
                 speculative="true" if speculative else "false",
             ))
             if console:
-                calls.append(_call("reply", thread_id="console",
+                # Answer in the session the message came from.
+                calls.append(_call("reply", thread_id=thread or "console",
                                    text="On it - I've started a clone on this. "
                                         "I'll tell you here when it's done."))
             notes.append(f"{trig_id}: dispatched" + (" speculatively" if speculative else ""))
@@ -268,9 +269,9 @@ class MockClient(LLMClient):
 
         if console:
             calls.append(_call(
-                "reply", thread_id="console",
-                text="I am here. On the offline mock model I can only dispatch work and "
-                     "report status - set ANTHROPIC_API_KEY to talk to me properly.",
+                "reply", thread_id=thread or "console",
+                text="I am here. In demo mode I can only start pretend work and report "
+                     "on it - choose a model with the Models button to talk to me properly.",
             ))
             notes.append(f"{trig_id}: console chat")
             return

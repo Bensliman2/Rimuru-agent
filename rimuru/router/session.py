@@ -17,6 +17,7 @@ what makes batching pay off.
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from ..agent.loop import AgentLoop
@@ -25,6 +26,16 @@ from ..context import inline_task, inline_thread
 from ..ids import ROUTER_SESSION_ID, new_id
 from ..models import Session, Task
 from ..recall import spill_digest
+
+# Added in quick build style (the default): people judge an assistant by how fast
+# they get something that works.
+QUICK_NOTE = """
+SPEED
+  People judge you by how fast they get something that works. When you
+  dispatch, ask for the simplest version that does what the person asked -
+  extras can come later. When the work is done, say what they have and how to
+  use it, and offer the improvements the clone left out as one short question.
+"""
 
 # A newer message that changes course, rather than adding to it. Only these make
 # a reply composed before them unsafe to send.
@@ -80,7 +91,12 @@ THE DIRECT CHAT (channel "console")
     detail about something already in progress, pass it on with message_worker
     (the worker is shown next to each task). If they ask how it is going, answer
     from the task state you can see.
-  - Reply with thread_id "console".
+  - The person may keep several sessions: separate conversations, each about
+    its own work, each its own thread (thr_..., shown with every message).
+    Reply on the thread the message came from - pass that thread_id ("console"
+    alone means the session that wrote last) - and pass it to dispatch_task too,
+    so the clone is listed in that session. Keep sessions apart: do not bring
+    one session's work into another unless the person does.
   - Answer first. When the person asks for something, reply in the SAME turn
     you act on it (reply and dispatch_task can go together), so they never
     wait through several of your turns before hearing from you.
@@ -126,6 +142,9 @@ class RouterAgent:
 
         self.registry = ToolRegistry()
         self._register_tools()
+        # The chat session a person wrote in last (see _tool_reply, _tool_dispatch).
+        self.latest_console_thread: str | None = None
+        self.latest_console_ts = 0.0
 
         self.loop = AgentLoop(
             session=self.session,
@@ -133,7 +152,8 @@ class RouterAgent:
             store=store,
             bus=bus,
             config=config,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=SYSTEM_PROMPT + (
+                QUICK_NOTE if getattr(config, "build_style", "quick") == "quick" else ""),
             registry=self.registry,
             role="router",
             budget_chars=config.router_context_budget,
@@ -261,6 +281,11 @@ class RouterAgent:
 
         if thread_id and thread_id not in self.store.threads:
             thread_id = None
+        if thread_id is None:
+            # Found in real use: work asked for in the chat was dispatched without
+            # its thread, so the clone belonged to no session. Link it to the
+            # chat session this turn is about, when that is clear.
+            thread_id = self._session_of_this_turn(loop)
 
         origin = None
         if thread_id and (thread := self.store.threads.get(thread_id)) and thread.trigger_ids:
@@ -293,6 +318,17 @@ class RouterAgent:
             f"It will report back to you when it has a conclusion."
         )
 
+    def _session_of_this_turn(self, loop: AgentLoop) -> str | None:
+        conv = self.config.conversation_channels
+        for msg in reversed([m for m in loop.messages[-4:] if m.role == "user"]):
+            ids = {t for t in re.findall(r"thr_[0-9a-f]+", msg.as_text())
+                   if (th := self.store.threads.get(t)) is not None and th.channel in conv}
+            if ids:
+                return ids.pop() if len(ids) == 1 else None      # two sessions: do not guess
+        if self.latest_console_thread and time.time() - self.latest_console_ts < 120:
+            return self.latest_console_thread
+        return None
+
     async def _tool_reply(self, args: dict[str, Any], loop: AgentLoop) -> str:
         thread_id = str(args.get("thread_id") or "").strip()
         text = str(args.get("text") or "").strip()
@@ -301,7 +337,8 @@ class RouterAgent:
 
         thread = self.store.threads.get(thread_id)
         if thread is None and thread_id.startswith("console"):
-            thread = self.store.get_or_create_thread("console", "direct", "direct line")
+            thread = (self.store.threads.get(self.latest_console_thread or "")
+                      or self.store.get_or_create_thread("console", "direct", "direct line"))
         if thread is None:
             # Never guess. Posting into whichever thread happened to be most
             # recent would put a reply in front of the wrong people.

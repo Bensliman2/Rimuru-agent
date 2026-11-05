@@ -17,6 +17,7 @@ Three backends:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import random
 import shutil
@@ -44,7 +45,8 @@ class SimulatedShell:
     def describe(self) -> str:
         return "simulated - nothing actually runs"
 
-    async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "") -> tuple[str, str]:
+    async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "",
+                  workdir: Path | None = None) -> tuple[str, str]:
         low = command.lower()
         base = 8.0
         if any(w in low for w in ("test", "suite", "verify", "ci")):
@@ -83,10 +85,12 @@ class HostShell:
     def describe(self) -> str:
         return "host - commands run directly on this machine, unsandboxed"
 
-    async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "") -> tuple[str, str]:
-        self.workspace.mkdir(parents=True, exist_ok=True)
+    async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "",
+                  workdir: Path | None = None) -> tuple[str, str]:
+        cwd = Path(workdir or self.workspace)
+        cwd.mkdir(parents=True, exist_ok=True)
         proc = await asyncio.to_thread(
-            subprocess.Popen, command, shell=True, cwd=str(self.workspace),
+            subprocess.Popen, command, shell=True, cwd=str(cwd),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         try:
@@ -112,6 +116,10 @@ class DockerShell:
         self.image = image
         self.memory = memory
         self.cpus = cpus
+        # Every container is labelled with the workspace it serves, so cleaning
+        # up after a crash removes only this instance's leftovers - never the
+        # running jobs of another Rimuru (an app, a benchmark) on the same machine.
+        self.owner = hashlib.sha256(str(self.workspace).lower().encode()).hexdigest()[:12]
         self.error = ""
         self._ready = threading.Event()
         self._building = False
@@ -137,11 +145,11 @@ class DockerShell:
             return False
         return probe.returncode == 0 and bool(probe.stdout.strip())
 
-    @staticmethod
-    def cleanup_orphans() -> int:
-        """Remove sandbox containers a crashed process left behind."""
+    def cleanup_orphans(self) -> int:
+        """Remove sandbox containers a crashed process of this workspace left behind."""
         try:
-            ids = subprocess.run(["docker", "ps", "-aq", "--filter", "name=rimuru-"],
+            ids = subprocess.run(["docker", "ps", "-aq", "--filter", "name=rimuru-",
+                                  "--filter", f"label=rimuru.workspace={self.owner}"],
                                  capture_output=True, text=True, timeout=30).stdout.split()
             if ids:
                 subprocess.run(["docker", "rm", "-f", *ids], capture_output=True, timeout=60)
@@ -175,22 +183,25 @@ class DockerShell:
 
         threading.Thread(target=work, name="sandbox-image", daemon=True).start()
 
-    def _args(self, command: str, name: str) -> list[str]:
+    def _args(self, command: str, name: str, workdir: Path | None = None) -> list[str]:
         args = [
             "docker", "run", "--rm", "--name", name,
+            "--label", f"rimuru.workspace={self.owner}",
             "--network", "none",                  # nothing gets in or out
             "--memory", self.memory, "--cpus", self.cpus, "--pids-limit", "256",
             "--read-only", "--tmpfs", "/tmp:rw,size=256m",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "-e", "HOME=/tmp", "-e", "PYTHONDONTWRITEBYTECODE=1",
-            "-v", f"{self.workspace}:/workspace", "-w", "/workspace",
+            # Only this job's folder is visible: the session's own, or the workspace.
+            "-v", f"{Path(workdir or self.workspace).resolve()}:/workspace", "-w", "/workspace",
         ]
         if hasattr(os, "getuid"):
             # On Linux hosts, keep files the container writes owned by the user.
             args += ["--user", f"{os.getuid()}:{os.getgid()}"]
         return args + [self.image, "sh", "-c", command]
 
-    async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "") -> tuple[str, str]:
+    async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "",
+                  workdir: Path | None = None) -> tuple[str, str]:
         if not self.ready:
             # First use while the image is still being built: wait for it.
             waited = 0.0
@@ -200,10 +211,10 @@ class DockerShell:
             if not self.ready:
                 return "failed", f"$ {command}\nsandbox unavailable: {self.error or 'image not ready'}"
 
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        Path(workdir or self.workspace).mkdir(parents=True, exist_ok=True)
         name = f"rimuru-{job_id or os.urandom(4).hex()}"
         proc = await asyncio.to_thread(
-            subprocess.Popen, self._args(command, name),
+            subprocess.Popen, self._args(command, name, workdir),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         try:
@@ -235,7 +246,7 @@ def make_shell(config: Any, *, speed: float = 1.0):
 
     if DockerShell.available():
         shell = DockerShell(config.workspace)
-        orphans = DockerShell.cleanup_orphans()
+        orphans = shell.cleanup_orphans()
         shell.prepare_in_background()
         return shell, "shell: docker sandbox (isolated, no network)" + (
             f" - removed {orphans} container(s) left by a crash" if orphans else "")

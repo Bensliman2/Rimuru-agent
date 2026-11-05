@@ -319,3 +319,18 @@ def test_a_turn_the_person_started_is_never_cut_short(tmp_path):
         await system.stop()
 
     asyncio.run(run())
+
+
+# --------------------------------------------------------------------------- #
+# Speed: a first version first (quick build style, the default)
+# --------------------------------------------------------------------------- #
+def test_quick_style_asks_for_a_first_version_and_thorough_does_not(tmp_path):
+    quick = make_system(tmp_path / "q")
+    assert "A FIRST VERSION FIRST" in clone(quick, 1).loop.system_prompt
+    assert "SPEED" in quick.router.loop.system_prompt
+    quick.store.close()
+
+    thorough = make_system(tmp_path / "t")
+    thorough.config.build_style = "thorough"
+    assert "A FIRST VERSION FIRST" not in clone(thorough, 2).loop.system_prompt
+    thorough.store.close()

@@ -250,21 +250,27 @@
   <section class="view" id="view-memory" role="tabpanel">
     <div class="hood-grid even">
       <section class="block">
-        <div class="block-head"><h2>Things Rimuru chose to remember</h2></div>
-        <ul class="notes" id="notes"></ul>
+        <div class="block-head"><h2>Find anything</h2></div>
+        <p class="muted">Type a word or two - from something you asked, a job, a person - and
+          pick from the list. No codes to remember.</p>
+        <form class="lookup" id="find-form" autocomplete="off">
+          <input id="find-q" placeholder="For example: calculator" spellcheck="false"
+                 aria-label="Search what Rimuru knows">
+          <button class="ghost" type="submit"><svg><use href="#i-search"/></svg>Search</button>
+        </form>
+        <div class="find-head" id="find-head"></div>
+        <div class="list scroll" id="find-results"></div>
       </section>
       <section class="block">
-        <div class="block-head"><h2>Look anything up</h2></div>
-        <p class="muted">Every message, conversation, job and clone has a short ID such as
-          <code>tsk_1a2b3c4d</code>. Rimuru looks things up by ID instead of keeping
-          everything in mind - and so can you. Click any ID in these views, or paste one:</p>
-        <form class="lookup" id="recall-form">
-          <input id="recall-id" placeholder="Paste an ID" spellcheck="false" aria-label="ID to look up">
-          <button class="ghost" type="submit"><svg><use href="#i-search"/></svg>Look up</button>
-        </form>
-        <pre class="recall-out" id="recall-out" hidden></pre>
+        <div class="block-head"><h2 id="found-title">What Rimuru knows about it</h2></div>
+        <div id="found"><p class="muted">Pick something on the left to see everything Rimuru
+          knows about it.</p></div>
       </section>
     </div>
+    <section class="block">
+      <div class="block-head"><h2>Things Rimuru chose to remember</h2></div>
+      <ul class="notes" id="notes"></ul>
+    </section>
   </section>
 
   <!-- PRACTICE -->

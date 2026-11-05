@@ -20,3 +20,9 @@ data/workspace/
 config/models.toml
 config/*.tmp
 .env.tmp
+
+# Session folders, demo data, benchmark and evaluation runs
+data/sessions/
+data/demo/
+data/speed/
+data/eval/

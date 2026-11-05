@@ -79,6 +79,7 @@
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("on", v.id === `view-${view}`));
     if (remember) history.replaceState(null, "", `#${view}${view === "clones" && state.clone ? `/${state.clone}` : ""}`);
     if (view === "messages" && !state.rulesLoaded) renderRules();
+    if (view === "memory" && !found.length) find($("find-q").value.trim());
     window.scrollTo(0, 0);
     renderView();
     renderFeeds();
@@ -114,9 +115,13 @@
   /* ================================================================ header and tabs */
   function renderStatus(o) {
     const live = state.connected;
-    $("status").className = `status ${live && !o.demo ? "online" : "offline"}`;
-    $("status-text").textContent = !live ? "Connecting" : o.demo ? "Demo mode" : "Live";
-    $("status-tip").textContent = o.demo
+    const blocked = (o.blocked || [])[0];
+    $("status").className = `status ${live && !o.demo && !blocked ? "online" : "offline"}`;
+    $("status-text").textContent = !live ? "Connecting" : blocked
+      ? (blocked.reason === "credit" ? "Out of credit" : "Key not accepted") : o.demo ? "Demo mode" : "Live";
+    $("status-tip").textContent = blocked
+      ? `${blocked.detail}. Rimuru and its clones wait and try again by themselves until it works.`
+      : o.demo
       ? "No AI model is set up, so Rimuru uses a stand-in that only pretends to work. Click Models to choose one."
       : `${o.models_note}. Everything here updates as it happens.`;
     $("stop").disabled = !(o.store.workers_live || o.store.workers_queued || o.sim.running);
@@ -342,21 +347,63 @@
       ? o.notes.slice().reverse().map((n) => `<li>${linkIds(esc(n.note))}</li>`).join("")
       : '<li class="muted">Nothing yet. Rimuru keeps short notes here that it will need across jobs.</li>');
   }
-  async function lookUp(id) {
-    id = String(id || "").trim();
-    if (!id) return;
-    $("recall-id").value = id;
-    const out = $("recall-out");
-    out.hidden = false;
-    out.textContent = "Looking it up…";
+  // Find anything by words. The person never needs an ID: they type what they
+  // remember and pick from the list. IDs still work when clicked elsewhere.
+  const KIND = {
+    session: ["chat", "Session"], job: ["route", "Job"], message: ["mail", "Message"],
+    conversation: ["chat", "Conversation"], note: ["book", "Remembered"],
+  };
+  let findTimer = null;
+  let found = [];
+  async function find(q) {
+    let r;
+    try { r = await api(`/api/search?q=${encodeURIComponent(q || "")}`); } catch { return; }
+    found = r.items;
+    $("find-head").textContent = !q ? "Most recent" :
+      r.total ? `${r.total} found${r.total > r.items.length ? `, showing the newest ${r.items.length}` : ""}`
+        : `Nothing matches “${q}”. Try another word.`;
+    $("find-results").innerHTML = found.map((it, i) => {
+      const [ic, label] = KIND[it.kind] || ["file", it.kind];
+      return `<button class="row" data-found="${i}">
+        <span class="fe-icon">${icon(ic)}</span>
+        <span class="row-main"><span class="row-title">${esc(it.title)}</span>
+          <span class="row-sub">${esc(it.sub || label)} &middot; ${clock(it.ts)}</span></span>
+        ${icon("chevron")}</button>`;
+    }).join("");
+  }
+  $("find-form").addEventListener("submit", (ev) => { ev.preventDefault(); find($("find-q").value.trim()); });
+  $("find-q").addEventListener("input", () => {
+    clearTimeout(findTimer);
+    findTimer = setTimeout(() => find($("find-q").value.trim()), 250);
+  });
+  $("find-results").addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-found]");
+    if (b) showFound(found[Number(b.dataset.found)]);
+  });
+
+  async function showFound(it) {
+    $("find-results").querySelectorAll(".row").forEach((r) =>
+      r.classList.toggle("on", found[Number(r.dataset.found)] === it));
+    const [, label] = KIND[it.kind] || ["", "Item"];
+    $("found-title").textContent = it.title.length > 70 ? it.title.slice(0, 69) + "…" : it.title;
+    const actions = [];
+    if (it.kind === "job" && it.clone) actions.push(`<button class="ghost small" data-session="${esc(it.clone)}">See the clone that did it</button>`);
+    if (it.kind === "session" && it.key) actions.push(`<a class="ghost small" href="/#chat=${encodeURIComponent(it.key)}">Open this session in the chat</a>`);
+    const head = `<p class="muted">${esc(label)} &middot; ${clock(it.ts)}</p>${actions.length ? `<div class="found-actions">${actions.join("")}</div>` : ""}`;
+    if (!it.id) { $("found").innerHTML = head + `<div class="box">${esc(it.title)}</div>`; return; }
+    $("found").innerHTML = head + '<p class="muted">Looking it up…</p>';
     try {
-      const r = await api(`/api/recall/${encodeURIComponent(id)}`);
-      out.innerHTML = linkIds(esc(r.text));
+      const r = await api(`/api/recall/${encodeURIComponent(it.id)}`);
+      $("found").innerHTML = head + `<h3 class="mini">Rimuru's own record of it</h3>
+        <pre class="recall-out">${linkIds(esc(r.text))}</pre>`;
     } catch (err) {
-      out.textContent = `Could not look that up: ${err.message}`;
+      $("found").innerHTML = head + `<p class="muted">Could not look that up: ${esc(err.message)}</p>`;
     }
   }
-  $("recall-form").addEventListener("submit", (ev) => { ev.preventDefault(); lookUp($("recall-id").value); });
+  // Clicking an ID anywhere still works: it is shown here.
+  function lookUp(id) {
+    if (id) showFound({ kind: "", id, title: id, ts: Date.now() / 1000 });
+  }
 
   /* ================================================================ practice runs */
   const PRACTICE = [

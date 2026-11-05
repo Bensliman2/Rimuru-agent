@@ -13,7 +13,7 @@ import pytest
 
 from rimuru.config import Config
 from rimuru.llm import MockClient, build_client, catalog, kimi
-from rimuru.llm.base import Msg, ToolSpec
+from rimuru.llm.base import Msg, ProviderAccountError, ToolSpec
 from rimuru.llm.openai_client import OpenAICompatClient
 
 
@@ -287,3 +287,31 @@ def test_translation_echoes_reasoning_only_when_asked():
     roles = [m["role"] for m in echo]
     # tool result must directly follow the assistant turn that called it
     assert roles == ["system", "user", "assistant", "tool", "user"]
+
+
+
+def test_out_of_credit_is_recognised_at_once_not_retried():
+    """Found in real use: Kimi answered every call with HTTP 429 'suspended due to
+    insufficient balance', and each call was retried six times for nothing."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, json={"error": {
+            "message": "Your account org-x <ak-y> is suspended due to insufficient balance, "
+                       "please recharge your account or check your plan and billing details",
+            "type": "exceeded_current_quota_error"}})
+
+    client = _client(handler)
+    client.provider_label = "Kimi (Moonshot)"
+    with pytest.raises(ProviderAccountError) as err:
+        asyncio.run(client.complete(system="s", messages=[Msg("user", "hi")], tools=[]))
+    assert err.value.reason == "credit" and calls["n"] == 1
+    assert err.value.plain() == "Kimi (Moonshot) says the account is out of credit"
+
+
+def test_a_refused_key_is_recognised():
+    client = _client(lambda request: httpx.Response(401, json={"error": {"message": "Invalid Authentication"}}))
+    with pytest.raises(ProviderAccountError) as err:
+        asyncio.run(client.complete(system="s", messages=[Msg("user", "hi")], tools=[]))
+    assert err.value.reason == "key"

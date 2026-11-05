@@ -36,11 +36,89 @@
 
   const state = { cards: [], openId: null, panelSig: "", chatSig: "", busy: false };
 
+
+  /* ------------------------------------------------------------- sessions */
+  // Each session is its own conversation, with its own clones and files.
+  const remember = (key) => { try { localStorage.setItem("rimuru.chat", key); } catch { /* private window */ } };
+  const recalled = () => { try { return localStorage.getItem("rimuru.chat"); } catch { return null; } };
+  state.chat = recalled();
+  state.sessions = [];
+
+  const since = (ts) => {
+    const s = Date.now() / 1000 - ts;
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+    return new Date(ts * 1000).toLocaleDateString([], { day: "numeric", month: "short" });
+  };
+
+  function renderSessions(list) {
+    state.sessions = list;
+    if (!state.chat) state.chat = list.length ? list[0].key : "direct";
+    const known = list.some((s) => s.key === state.chat);
+    const rows = [];
+    if (!known) {
+      rows.push(`<button class="session on" data-chat="${esc(state.chat)}">
+        <span class="session-title">New session</span><span class="session-sub">Not started yet</span></button>`);
+    }
+    list.forEach((s) => rows.push(`<button class="session${s.key === state.chat ? " on" : ""}" data-chat="${esc(s.key)}"
+        title="${esc(s.title)}">
+        <span class="session-title">${esc(s.title)}</span>
+        <span class="session-sub">${s.working ? `<span class="live-dot"></span>${s.working} working &middot; ` : ""}${since(s.last_ts)}</span>
+      </button>`));
+    $("session-list").innerHTML = rows.join("") ||
+      '<p class="session-empty">Your sessions will appear here.</p>';
+    const current = list.find((s) => s.key === state.chat);
+    const note = $("files-note");
+    note.hidden = !(current && current.folder);
+    if (current && current.folder) {
+      note.innerHTML = `${icon("folder")}<span>This session's files are in <code>${esc(current.folder)}</code></span>`;
+    }
+  }
+
+  function switchSession(key) {
+    if (key === state.chat) { closeSessions(); return; }
+    state.chat = key;
+    remember(key);
+    state.chatSig = "";
+    closePanel();
+    closeSessions();
+    messagesEl.querySelectorAll(".msg, .event, .typing").forEach((n) => n.remove());
+    $("welcome").hidden = false;
+    renderSessions(state.sessions);
+    refresh();
+    input.focus();
+  }
+  function newSession() {
+    const key = "s-" + Array.from(crypto.getRandomValues(new Uint8Array(4)),
+      (b) => b.toString(16).padStart(2, "0")).join("");
+    switchSession(key);
+  }
+
+  const openSessions = () => { $("sessions").classList.add("open"); $("sessions-scrim").hidden = false; };
+  const closeSessions = () => { $("sessions").classList.remove("open"); $("sessions-scrim").hidden = true; };
+  $("sessions-toggle").addEventListener("click", openSessions);
+  $("sessions-scrim").addEventListener("click", closeSessions);
+  $("new-session").addEventListener("click", newSession);
+  $("session-list").addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-chat]");
+    if (b) switchSession(b.dataset.chat);
+  });
+
   /* ------------------------------------------------------------- status */
   function renderStatus(w) {
     const el = $("status");
     let text, tip, cls;
     $("demo-banner").hidden = !w.demo;
+    const blocked = (w.blocked || [])[0];
+    if (blocked) {
+      el.className = "status offline";
+      $("status-text").textContent = blocked.reason === "credit" ? "Out of credit" : "Key not accepted";
+      $("status-tip").textContent = blocked.reason === "credit"
+        ? `${blocked.provider} says the account is out of credit, so Rimuru cannot think. Top it up and Rimuru carries on by itself.`
+        : `${blocked.provider} is not accepting the API key. Check it with the Models button; Rimuru carries on by itself once it works.`;
+      return;
+    }
     $("demo-why").textContent = w.demo_forced
       ? "Rimuru was started in demo mode (--demo), so it only pretends to work."
       : "No AI model is set up yet, so nothing real is built.";
@@ -141,7 +219,7 @@
     state.busy = true;
     input.value = ""; autosize();
     try {
-      await post("/api/message", { text });
+      await post("/api/message", { text, thread_key: state.chat || "direct" });
       state.justSent = true;
       await refreshChat();
     } catch (err) {
@@ -234,8 +312,8 @@
   });
 
   $("stop").addEventListener("click", async () => {
-    if (!confirm("Stop everything Rimuru is working on right now?")) return;
-    await post("/api/stop");
+    if (!confirm("Stop everything Rimuru is working on in this session?")) return;
+    await post("/api/stop", { chat: state.chat || "direct" });
     refresh();
   });
 
@@ -647,11 +725,17 @@
 
   /* ------------------------------------------------------------- refresh */
   async function refreshChat() {
-    try { renderChat(await api("/api/chat")); } catch { /* server restarting */ }
+    const key = state.chat || "direct";
+    try {
+      const data = await api(`/api/chat?chat=${encodeURIComponent(key)}`);
+      if (key === (state.chat || "direct")) renderChat(data);   // still the same session
+    } catch { /* server restarting */ }
   }
   async function refresh() {
     try {
-      const w = await api("/api/work");
+      const list = await api("/api/chats");
+      renderSessions(list.items);
+      const w = await api(`/api/work?chat=${encodeURIComponent(state.chat || "direct")}`);
       renderStatus(w); renderClones(w);
     } catch {
       $("status").className = "status offline";
@@ -678,6 +762,10 @@
   refresh();
   autosize();
   if (location.hash === "#models") openSettings();      // "Change" in Under the hood
+  if (location.hash.startsWith("#chat=")) {               // "Open this session" in Under the hood
+    switchSession(decodeURIComponent(location.hash.slice(6)));
+    history.replaceState(null, "", location.pathname);
+  }
   setInterval(refresh, 4000);       // ticks elapsed times; also a fallback
   input.focus();
 })();

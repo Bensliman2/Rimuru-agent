@@ -46,8 +46,15 @@ Then open **http://127.0.0.1:8800**.
 - **Add details any time.** Say "also make it do X" while a clone is working and
   Rimuru passes it to the right clone.
 - **Stop** stops everything in progress. A single job can be stopped from its details.
+- **One session per piece of work.** Click **New session** for each new thing you
+  want done. Every session keeps its own conversation, its own clones and its own
+  folder of files (`data/sessions/<name>`), so nothing gets mixed up - and Rimuru
+  still remembers what you told it in other sessions.
 - **Interrupt any time.** If Rimuru is busy with something else when you write - a
   clone's report, a group chat - your message cuts in and is answered first.
+- **If your AI provider runs out of credit** or rejects the key, Rimuru says so in
+  the chat and in the status at the top, keeps trying quietly, and carries on by
+  itself once it works again - no need to ask twice.
 - **Restarts lose nothing.** The chat, every job and its history come back. A job that
   was running is picked up again, once, and Rimuru tells you so; if it is cut off a
   second time it stops and says so rather than looping.
@@ -80,7 +87,7 @@ the same plain language as the chat - one view at a time:
 | Clones | every clone with its little slime; pick one to see its job, its commands and every turn |
 | Watchdog | its checks and interventions, its notes - and a box to ask it why something failed |
 | Messages | what happened to every incoming message, and the rules for group chats, editable in plain words |
-| Memory | the notes Rimuru keeps, and a lookup for any ID |
+| Memory | find anything by typing a word or two - a session, a job, a message - and the notes Rimuru keeps |
 | Practice runs | scripted workloads - a busy team chat, a burst, a quiet day, two coding exercises |
 
 Five modules, each a section of the article:
@@ -108,6 +115,14 @@ says.
 | Build a calculator and a unit converter in parallel | **PASS** - hidden acceptance tests 37/37 |
 | Same, typed into the chat app, clones running code in the sandbox | **PASS** - hidden tests 37/37; its own 134 tests pass; it ran its CLI to check itself; Rimuru relayed a mid-task follow-up to the right clone |
 | **Under pressure**: a messy morning - parallel clones on one file, a change of mind, cancel, secrets, prompt injection, a crash | First run: 11 pass, 1 fail, and the crash probe failed. **After the fixes: 13 pass, 0 fail, 3 warnings; the crash and Stop probes pass** - see [docs/evaluation.md](docs/evaluation.md) |
+
+**Speed.** Clones now build the smallest version that works first and offer extras
+afterwards (`RIMURU_BUILD_STYLE=quick`, the default; `thorough` builds everything at
+once). How fast they are depends mostly on the clones' model. "Build a calculator with
+a web UI" took **14.6 minutes** the old way on `kimi-k3.1-pro`, 5.9 with the quick
+style on the same model, and **1.9 minutes** with the quick style on
+`kimi-k2.7-code-highspeed` - and every version worked. Details and the model
+recommendation: [docs/speed.md](docs/speed.md).
 
 Things only a real model surfaced, all fixed:
 
@@ -139,13 +154,15 @@ Things only a real model surfaced, all fixed:
 ## For developers
 
 ```bash
-python -m pytest                          # 48 checks, including sandbox safety
+python -m pytest                          # 56 checks, including sandbox safety
 python run.py --demo                      # no AI model at all - an offline stand-in
 python run.py bench --scenario team       # the article's 300-event workload, headless
 python run.py bench --scenario smoke --speed 1   # real-model bug fixing on your models, graded
 python run.py verify build                # grade a calculator/converter build
 python run.py trace --db data/rimuru.db   # one request's journey, step by step
 python run.py eval run                    # the end-to-end evaluation (docs/evaluation.md)
+python run.py speed probe                 # how fast each of your models writes
+python run.py speed run --label NAME      # three everyday requests, timed and checked (docs/speed.md)
 ```
 
 `scenarios/` holds the simulated workloads, a small repo with real bugs, and the hidden
@@ -190,6 +207,6 @@ config/          models.toml - your models (made by the Models button), and an e
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           48 automated checks
+tests/           56 automated checks
 run.py           serve | bench | verify | trace | eval
 ```

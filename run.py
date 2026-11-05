@@ -25,6 +25,15 @@ def _apply_args(args: argparse.Namespace):
 
     if args.demo or args.provider in {"mock", "demo"}:
         CONFIG.demo = True
+    if args.data:
+        # Everything this run keeps - database, workspace, session folders - under
+        # one folder, e.g. a demo that never mixes with your real history.
+        from pathlib import Path
+
+        base = Path(args.data).resolve()
+        CONFIG.db_path = base / "rimuru.db"
+        CONFIG.workspace = base / "workspace"
+        CONFIG.sessions_dir = base / "sessions"
     if args.workers:
         CONFIG.max_workers = args.workers
     return CONFIG
@@ -384,9 +393,20 @@ def main() -> int:
 
     logging.basicConfig(level=logging.WARNING,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    if sys.argv[1:2] == ["speed"]:
+        # How long everyday requests take, end to end (scenarios/speed/run_speed.py).
+        # It has its own options, so it gets the command line as it is.
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parent / "scenarios" / "speed" / "run_speed.py"
+        spec = importlib.util.spec_from_file_location("run_speed", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.main(sys.argv[2:])
     parser = argparse.ArgumentParser(description="Rimuru super-agent")
     parser.add_argument("command", nargs="?", default="serve",
-                        choices=["serve", "bench", "trace", "verify", "eval"])
+                        choices=["serve", "bench", "trace", "verify", "eval", "speed"])
     parser.add_argument("task", nargs="?", default=None,
                         help="trace: the task id to follow (default: the first task); "
                              "verify: the scenario to check (smoke | build)")
@@ -400,6 +420,8 @@ def main() -> int:
     parser.add_argument("--provider", default=None, choices=["mock", "demo"],
                         help=argparse.SUPPRESS)      # older spelling of --demo
     parser.add_argument("--workers", type=int, default=None, help="max concurrent workers")
+    parser.add_argument("--data", default=None,
+                        help="keep the database, workspace and session folders under this folder")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--drain", type=float, default=None,

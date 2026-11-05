@@ -19,6 +19,7 @@ from ..context import inline_trigger
 from ..ids import new_id
 from ..llm import build_client
 from ..models import TERMINAL, Session, Task
+from ..sessions import folder_for
 from .session import WorkerAgent
 
 
@@ -83,6 +84,7 @@ class WorkerPool:
             task_id=task.id,
         ))
 
+        thread = self.store.threads.get(thread_id or task.thread_id or "")
         worker = WorkerAgent(
             task=task,
             session=session,
@@ -96,6 +98,7 @@ class WorkerPool:
             speculative=speculative,
             shell=self.shell,
             resume_note=resume_note,
+            root=folder_for(self.config, thread),
         )
         self.workers[session.id] = worker
         self.store.update_task(task, worker_id=session.id, status="queued")

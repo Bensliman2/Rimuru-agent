@@ -91,6 +91,23 @@ COMMANDS RUN ON THE HOST
   workspace and never touch anything outside it.
 """
 
+QUICK_NOTE = """
+WORK FAST: A FIRST VERSION FIRST
+  Someone is waiting, and every token you write - thinking included - takes
+  time. So:
+  - Think briefly. Plan the next step in a few lines, act, and look at the
+    result. Do not design the whole thing up front.
+  - Build the smallest version that does what was asked: as few files as it
+    needs, and nothing nobody asked for - no README, icons or config files, and
+    no server when a page alone will do. One file is best when one is enough.
+  - Write a few focused tests for the core behaviour, not an exhaustive suite.
+    Run them, fix what fails, and stop.
+  - Write each file once and completely, and make independent writes in the
+    same turn.
+  - When it works, finish(). In your summary, name up to three improvements
+    you left out, so the person can ask for them.
+"""
+
 SPECULATIVE_NOTE = """
 THIS TASK IS SPECULATIVE
   Nobody asked you for this. You are acting ahead on a signal in the
@@ -117,8 +134,12 @@ class WorkerAgent:
         speculative: bool = False,
         shell: Any = None,
         resume_note: str | None = None,
+        root: Path | None = None,
     ) -> None:
         self.task = task
+        # Its folder: the session's own, or the shared workspace for other work.
+        self.root = Path(root or config.workspace).resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
         self.session = session
         self.store = store
         self.bus = bus
@@ -137,6 +158,7 @@ class WorkerAgent:
             SYSTEM_PROMPT
             + {"docker": SANDBOX_NOTE, "host": HOST_NOTE}.get(
                 getattr(shell, "kind", "simulated"), NO_SHELL_NOTE)
+            + (QUICK_NOTE if getattr(config, "build_style", "quick") == "quick" else "")
             + (SPECULATIVE_NOTE if speculative else "")
         )
         self.loop = AgentLoop(
@@ -321,7 +343,7 @@ class WorkerAgent:
 
     async def _run_job(self, job: Job, loop: AgentLoop) -> None:
         try:
-            status, output = await self.shell.run(job.command, job_id=job.id)
+            status, output = await self.shell.run(job.command, job_id=job.id, workdir=self.root)
         except asyncio.CancelledError:
             # stop() was called, or the session is shutting down. The worker
             # asked for this, so no completion event is delivered.
@@ -408,7 +430,7 @@ class WorkerAgent:
 
     # ------------------------------------------------------------------ #
     def _safe_path(self, raw: str) -> Path | None:
-        workspace = Path(self.config.workspace).resolve()
+        workspace = self.root
         candidate = (workspace / raw).resolve()
         try:
             candidate.relative_to(workspace)
@@ -422,7 +444,7 @@ class WorkerAgent:
             return "Refused: that path is outside the workspace."
         if not root.exists():
             return f"No such directory: {args.get('path') or '.'}"
-        workspace = Path(self.config.workspace).resolve()
+        workspace = self.root
         found = sorted(
             str(p.relative_to(workspace)).replace("\\", "/")
             for p in root.rglob("*")
@@ -498,7 +520,7 @@ class WorkerAgent:
         except (TypeError, ValueError):
             timeout = 60.0
         _status, output = await self.shell.run(command, timeout=timeout,
-                                               job_id=new_id("job"))
+                                               job_id=new_id("job"), workdir=self.root)
         return output
 
 

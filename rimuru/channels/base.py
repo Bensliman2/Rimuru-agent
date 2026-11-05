@@ -131,6 +131,6 @@ class ConsoleChannel:
 
     async def deliver(self, thread_key: str, text: str) -> str:
         if self.store is not None:
-            self.store.add_chat("rimuru", text)
+            self.store.add_chat("rimuru", text, chat=thread_key)
         self.bus.emit("console.message", thread_key=thread_key, text=text)
         return text

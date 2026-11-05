@@ -22,12 +22,20 @@ from fastapi.staticfiles import StaticFiles
 from ..config import CONFIG, ROOT
 from ..llm import catalog
 from ..recall import recall as do_recall
+from .. import sessions as chats
 from ..system import RimuruSystem
 from . import friendly
 
 STATIC = Path(__file__).parent / "static"
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+
+
+class _NoTask:
+    thread_id = None
+
+
+_NO_TASK = _NoTask()
 
 
 def _host_of(value: str) -> str:
@@ -108,16 +116,50 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
     # ------------------------------------------------------------------ #
     # the chat app's read models
     # ------------------------------------------------------------------ #
-    @app.get("/api/chat")
-    async def chat() -> dict[str, Any]:
+    def session_thread(key: str):
+        return system.store.threads.get(system.store.thread_by_key.get(f"console:{key}", ""))
+
+    def in_session(task, key: str) -> bool:
+        thread = system.store.threads.get(task.thread_id or "")
+        return thread is not None and thread.channel == "console" and thread.key == key
+
+    @app.get("/api/chats")
+    async def list_chats() -> dict[str, Any]:
+        """The person's sessions, most recent first."""
         store = system.store
-        conv = system.config.conversation_channels
-        chat_threads = {t.id for t in store.threads.values() if t.channel in conv}
-        items: list[dict[str, Any]] = [dict(m) for m in store.chat]
+        items = []
+        for thread in store.threads.values():
+            if not chats.is_session(thread, system.config):
+                continue
+            said = [m for m in store.chat if m.get("chat", chats.DEFAULT) == thread.key]
+            jobs = [t for t in store.tasks.values() if t.thread_id == thread.id]
+            if not said and not jobs:
+                continue
+            folder = chats.folder_for(system.config, thread)
+            try:
+                shown = str(folder.relative_to(ROOT)).replace("\\", "/")
+            except ValueError:
+                shown = str(folder)
+            items.append({
+                "key": thread.key, "title": chats.title_of(store, thread),
+                "created_ts": thread.created_ts,
+                "last_ts": max([thread.last_ts] + [m["ts"] for m in said]),
+                "working": sum(1 for t in jobs if t.status in {"running", "queued"}),
+                "jobs": len(jobs),
+                "folder": shown if folder.exists() and any(folder.iterdir()) else None,
+            })
+        items.sort(key=lambda c: c["last_ts"], reverse=True)
+        return {"items": items}
+
+    @app.get("/api/chat")
+    async def chat(chat: str = chats.DEFAULT) -> dict[str, Any]:
+        store = system.store
+        items: list[dict[str, Any]] = [dict(m) for m in store.chat
+                                       if m.get("chat", chats.DEFAULT) == chat]
         # Show, inside the conversation, when Rimuru hands work to a clone and
         # when that work comes back - so the chat and the clones connect.
         for task in store.tasks.values():
-            if task.thread_id not in chat_threads:
+            if not in_session(task, chat):
                 continue
             base = {"role": "event", "task_id": task.id, "worker_id": task.worker_id,
                     "title": task.title}
@@ -130,17 +172,21 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         # last message is unanswered - not while it is busy with a group chat.
         router = system.router
         busy = router.session.status in {"thinking", "tool"} or router.loop.inbox.qsize() > 0
-        last_said = next((m for m in reversed(store.chat)), None)
+        last_said = next((m for m in reversed(store.chat)
+                          if m.get("chat", chats.DEFAULT) == chat), None)
         age = time.time() - last_said["ts"] if last_said else 1e9
         unanswered = bool(last_said and last_said["role"] == "user" and age < 90)
         return {"messages": items, "thinking": unanswered and (busy or age < 10)}
 
     @app.get("/api/work")
-    async def work() -> dict[str, Any]:
+    async def work(chat: str | None = None) -> dict[str, Any]:
+        """Every clone - or, with ?chat=, only that session's."""
         conv = system.config.conversation_channels
+        store = system.store
         cards = [
-            friendly.worker_card(system.store, s, conv)
-            for s in system.store.sessions_of_kind("worker")
+            friendly.worker_card(store, s, conv)
+            for s in store.sessions_of_kind("worker")
+            if chat is None or in_session(store.tasks.get(s.task_id or "") or _NO_TASK, chat)
         ]
         cards.sort(key=lambda c: c["started_ts"] or 0, reverse=True)
         overview = system.overview()
@@ -148,6 +194,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             "cards": cards,
             "demo": overview["demo"],
             "demo_forced": system.config.demo_forced(),
+            "blocked": overview["blocked"],
             "provider": overview["models"]["worker"]["provider"],
             "model": overview["models"]["worker"]["model"],
             "shell": overview["shell"],
@@ -169,20 +216,25 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         }
 
     @app.post("/api/stop")
-    async def stop_everything() -> dict[str, Any]:
-        """The one button a non-technical person needs: stop everything."""
-        live = [t for t in system.store.tasks.values() if t.status in {"running", "queued"}]
+    async def stop_everything(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The one button a non-technical person needs. In the chat it stops that
+        session's work; under the hood (no session given) it stops everything."""
+        key = str((payload or {}).get("chat") or "")
+        live = [t for t in system.store.tasks.values() if t.status in {"running", "queued"}
+                and (not key or in_session(t, key))]
         for task in live:
             await system.pool.stop(task, reason="stopped by the person")
-        if system.sim.running:
+        if not key and system.sim.running:
             system.sim.stop()
         if live:
             titles = "; ".join(f'"{t.title}"' for t in live)
+            thread = session_thread(key) if key else None
+            where = f'thread_id "{thread.id}"' if thread else 'the thread each task came from'
             # Rimuru must know, or it might pick the work back up on its own.
             system.router.loop.inject(
                 f"The person pressed Stop. These tasks were cancelled: {titles}. "
                 f"Do not restart them unless they ask. Acknowledge briefly in the "
-                f"chat (thread_id \"console\").",
+                f"chat ({where}).",
                 kind="human",
             )
         return {"ok": True, "stopped": len(live)}
@@ -197,7 +249,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         await system.pool.stop(task, reason="stopped by the person")
         system.router.loop.inject(
             f'The person stopped the task "{task.title}". Do not restart it unless '
-            f'they ask. Acknowledge briefly in the chat (thread_id "console").',
+            f'they ask. Acknowledge briefly in the chat (thread_id "{task.thread_id}").',
             kind="human",
         )
         return {"ok": True, "stopped": 1}
@@ -333,6 +385,46 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             "text": do_recall(obj_id, system.store, full=full,
                               cap=system.config.inline_content_cap),
         }
+
+    @app.get("/api/search")
+    async def search(q: str = "", limit: int = 40) -> dict[str, Any]:
+        """Find anything Rimuru knows by a few words - no IDs needed. With no
+        words, the most recent sessions, jobs and notes."""
+        store = system.store
+        words = [w for w in q.lower().split() if w]
+        found = lambda *texts: all(w in " ".join(str(t or "") for t in texts).lower() for w in words)  # noqa: E731
+        label = {"console": "Your chat", "im": "Team chat", "github": "GitHub"}
+        status = {"running": "working", "queued": "waiting", "done": "done", "failed": "couldn't finish",
+                  "cancelled": "stopped"}
+        items: list[dict[str, Any]] = []
+        for thread in store.threads.values():
+            if chats.is_session(thread, system.config):
+                title = chats.title_of(store, thread)
+                if found(title):
+                    items.append({"kind": "session", "id": thread.id, "key": thread.key, "title": title,
+                                  "sub": f"Session \u00b7 {len(thread.trigger_ids)} message"
+                                         + ("" if len(thread.trigger_ids) == 1 else "s"),
+                                  "ts": thread.last_ts})
+            elif words and found(thread.title):
+                items.append({"kind": "conversation", "id": thread.id, "title": thread.title,
+                              "sub": f"{label.get(thread.channel, thread.channel)} conversation", "ts": thread.last_ts})
+        for task in store.tasks.values():
+            if found(task.title, task.brief, task.result):
+                items.append({"kind": "job", "id": task.id, "title": task.title, "clone": task.worker_id,
+                              "sub": f"Job \u00b7 {status.get(task.status, task.status)}", "ts": task.created_ts})
+        if words:
+            for trigger in store.triggers.values():
+                if found(trigger.content, trigger.author):
+                    items.append({"kind": "message", "id": trigger.id,
+                                  "title": " ".join(trigger.content.split())[:120],
+                                  "sub": f"Message from {trigger.author} \u00b7 {label.get(trigger.channel, trigger.channel)}",
+                                  "ts": trigger.ts})
+        for note in store.notes:
+            if found(note["note"]):
+                items.append({"kind": "note", "id": None, "title": note["note"],
+                              "sub": "Something Rimuru chose to remember", "ts": note["ts"]})
+        items.sort(key=lambda i: i["ts"], reverse=True)
+        return {"items": items[:limit], "total": len(items)}
 
     @app.get("/api/batching")
     async def batching(window: int = 8) -> dict[str, Any]:

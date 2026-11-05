@@ -26,7 +26,7 @@ from typing import Any, Callable
 from ..config import Config
 from ..context import trim_messages
 from ..ids import new_id
-from ..llm.base import LLMClient, Msg
+from ..llm.base import LLMClient, Msg, ProviderAccountError
 from ..models import Session, Step, Usage, now
 from .tools import ToolRegistry
 
@@ -87,6 +87,10 @@ class AgentLoop:
         # result - so the person is not left waiting behind it. A turn that a
         # person started is never cut short.
         self.cut_in: Callable[[Injection], bool] | None = None
+        # Set while the provider refuses this account; the turn is retried.
+        self.blocked: ProviderAccountError | None = None
+        self._blocked_wait = float(getattr(config, "blocked_retry_seconds", 30.0))
+        self._retry_turn = False
         self.cut_ins = 0
         self._call: asyncio.Future | None = None
         self._turn_from_person = False
@@ -236,7 +240,20 @@ class AgentLoop:
 
         while not self._stop.is_set():
             try:
-                if pending_results is None:
+                if self._retry_turn:
+                    # The provider refused this turn (see ProviderAccountError
+                    # below). Try the same turn again, with anything new folded in.
+                    self._retry_turn = False
+                    extra = await self._drain(block=False)
+                    if extra:
+                        text = "This arrived meanwhile:\n" + self._render_batch(extra)
+                        last = self.messages[-1]
+                        content = (f"{last.content}\n\n{text}" if isinstance(last.content, str)
+                                   else [*last.content, {"type": "text", "text": text}])
+                        self.messages[-1] = Msg(role=last.role, content=content)
+                        injected = f"{injected}\n\n{text}"
+                        batch_size += len(extra)
+                elif pending_results is None:
                     batch = await self._drain(block=True)
                     if self._stop.is_set():
                         break
@@ -295,6 +312,31 @@ class AgentLoop:
                     if response is None:          # stopped while a call was cut short
                         break
                     self.error_count = 0
+                    if self.blocked is not None:
+                        self.bus.emit("provider.recovered", session_id=self.session.id,
+                                      role=self.role, provider=self.blocked.provider)
+                        self.blocked = None
+                        self._blocked_wait = float(getattr(self.config, "blocked_retry_seconds", 30.0))
+                except ProviderAccountError as exc:
+                    # Out of credit, or the key refused. Not this turn's fault and
+                    # not fixed by retrying at once: say so once, then try the same
+                    # turn again now and then, so the work carries on by itself
+                    # when the person has fixed it.
+                    if self.blocked is None:
+                        step.error = f"{exc.plain()} ({exc.detail[:200]})"
+                        step.latency_ms = (time.perf_counter() - started) * 1000
+                        self.store.add_step(step)
+                        step_index += 1
+                        self.bus.emit("provider.blocked", session_id=self.session.id, role=self.role,
+                                      reason=exc.reason, provider=exc.provider, detail=exc.plain())
+                    self.blocked = exc
+                    self.store.touch_session(self.session, status="waiting",
+                                             current_activity=f"{exc.plain()} - trying again by itself")
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(self._stop.wait(), timeout=self._blocked_wait)
+                    self._blocked_wait = min(self._blocked_wait * 2, 120.0)
+                    self._retry_turn = True
+                    continue
                 except Exception as exc:
                     self.error_count += 1
                     step.error = f"{type(exc).__name__}: {exc}"
@@ -306,7 +348,9 @@ class AgentLoop:
                     )
                     self.store.touch_session(self.session, status="waiting",
                                              current_activity=f"API error: {step.error[:120]}")
-                    if self.error_count >= 5:
+                    # A clone gives up after five failures in a row. Rimuru does not:
+                    # it is the one who talks to people, so it waits and goes on.
+                    if self.error_count >= 5 and self.role != "router":
                         self.store.touch_session(self.session, status="failed")
                         break
                     await asyncio.sleep(min(10.0, 1.5 * self.error_count))

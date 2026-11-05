@@ -70,7 +70,29 @@ def test_runaway_command_is_killed(shell):
     status, out = run(shell, "sleep 60", timeout=3)
     assert status == "failed" and "container killed" in out
     leftovers = subprocess.run(
-        ["docker", "ps", "--filter", "name=rimuru-", "--format", "{{.Names}}"],
+        ["docker", "ps", "--filter", f"label=rimuru.workspace={shell.owner}", "--format", "{{.Names}}"],
         capture_output=True, text=True,
     ).stdout.strip()
     assert leftovers == "", f"container survived the timeout: {leftovers}"
+
+
+def test_cleanup_after_a_crash_spares_other_instances(tmp_path):
+    """Found while building the speed benchmark: on start, Rimuru removed every
+    sandbox container on the machine - including the running jobs of another
+    Rimuru (the app, while a benchmark started). Now each cleans up only its own."""
+    mine = DockerShell(tmp_path / "mine")
+    theirs = DockerShell(tmp_path / "theirs")
+    for sh in (mine, theirs):
+        sh.workspace.mkdir(parents=True)
+        sh._ready.set()
+    name = f"rimuru-test-{theirs.owner}"
+    subprocess.run(theirs._args("sleep 60", name)[:-4] + ["-d", SANDBOX_IMAGE, "sleep", "60"],
+                   capture_output=True, check=True)
+    try:
+        mine.cleanup_orphans()
+        alive = subprocess.run(["docker", "ps", "--filter", f"name={name}", "--format", "{{.Names}}"],
+                               capture_output=True, text=True).stdout.strip()
+        assert alive == name, "another instance's running job was killed"
+        assert theirs.cleanup_orphans() == 1
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True)

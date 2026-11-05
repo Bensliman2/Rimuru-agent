@@ -67,6 +67,13 @@ class Config:
     worker_stall_seconds: float = field(default_factory=lambda: float(_int("RIMURU_STALL_SECONDS", 120)))
     worker_max_steps: int = field(default_factory=lambda: _int("RIMURU_WORKER_MAX_STEPS", 40))
     worker_max_tokens: int = field(default_factory=lambda: _int("RIMURU_WORKER_MAX_TOKENS", 16384))
+    # When the provider refuses the account (out of credit, key refused), try
+    # again after this many seconds, doubling up to two minutes.
+    blocked_retry_seconds: float = 30.0
+    # How clones build: "quick" delivers the smallest working version first and
+    # offers extras afterwards; "thorough" builds everything it thinks of in one go.
+    build_style: str = field(default_factory=lambda: (
+        os.environ.get("RIMURU_BUILD_STYLE") or "quick").strip().lower())
 
     # --- tools ---
     enable_bash: bool = field(default_factory=lambda: _bool("RIMURU_ENABLE_BASH", False))
@@ -74,6 +81,11 @@ class Config:
     shell: str = field(default_factory=lambda: (os.environ.get("RIMURU_SHELL") or "auto").lower())
     workspace: Path = field(
         default_factory=lambda: Path(os.environ.get("RIMURU_WORKSPACE", "./data/workspace")).resolve()
+    )
+    # Each chat session's own folder lives here (rimuru/sessions.py) - outside the
+    # shared workspace, so resetting the workspace never wipes a session's work.
+    sessions_dir: Path = field(
+        default_factory=lambda: Path(os.environ.get("RIMURU_SESSIONS", "./data/sessions")).resolve()
     )
 
     # Channels that are one continuous conversation with a person. The Router

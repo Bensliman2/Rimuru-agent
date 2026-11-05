@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+data/*.db
+data/*.db-journal
+*.log
+.DS_Store
+
+# API keys kept in plain files must never be committed
+token
+token.txt
+*.token
+
+# What the clones build is your data, not source code
+data/workspace/
+
+# Your model choices (no secrets - but they are yours, not the project's)
+config/models.toml
+config/*.tmp
+.env.tmp

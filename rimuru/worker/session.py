@@ -1,0 +1,506 @@
+"""The Worker layer (article s2.2).
+
+Each Worker has an isolated context, a full set of execution tools, and exactly
+one task. Workers determine the quality of the output, so they are the sessions
+that get the strong model.
+
+Workers never talk to humans. Their reasoning and tool traffic stay inside the
+session; conclusions go to the Router, which owns every external reply. That is
+what buys concurrency without users being hit by several sessions answering at
+once.
+
+Peer Workers do not message each other. When two of them overlap on the same
+environment - the same pull request, say - both subscribe to that Thread, so
+both see the same events and get the chance to notice and resolve the conflict
+themselves (s3.2).
+"""
+from __future__ import annotations
+
+import asyncio
+import time
+from pathlib import Path
+from typing import Any
+
+from ..agent.loop import AgentLoop
+import hashlib
+
+from ..agent.tools import ToolRegistry, b, enum, obj, register_recall, s
+from ..ids import new_id
+from ..models import Job, Session, Task
+
+SYSTEM_PROMPT = """You are a Worker session inside a Super-agent called Rimuru.
+
+You have one task, your own private context, and the tools to actually do it.
+
+WHO YOU TALK TO
+  Only the Router. You have no channel to any human, by design. Your reasoning
+  and your tool output stay here. When you reach a conclusion, call report() for
+  progress worth knowing or finish() when the task is over, and the Router
+  decides what a person should hear.
+
+SLOW WORK
+  Anything that takes real time goes through start(), which returns immediately
+  with a job ID. Do not wait and do not poll: the result is delivered to you as
+  a new event when it is ready, and you can keep working in the meantime. Use
+  stop() if a job runs away.
+
+EVENTS WHILE YOU WORK
+  You are subscribed to the thread this task came from, so follow-ups arrive
+  here directly. Read them:
+    - if they change the task, adapt and say so in your next report
+    - if the requester withdraws it, finish() with outcome=cancelled
+    - if they belong to a different task, call handback() so the Router can
+      route them, or unsubscribe() if the thread is no longer yours
+  Another worker may be subscribed to the same thread. If you see its activity
+  colliding with yours, resolve it yourself - do not wait to be coordinated.
+
+FILES ARE SHARED
+  Other clones may be changing the same files at the same time. Change files
+  with edit_file (an exact, small replacement) whenever you can. write_file
+  replaces a whole file: it needs the version from your latest read_file and is
+  refused if the file changed since. If a write or edit is refused, read the
+  file again and merge - never drop changes someone else made.
+
+FINISHING
+  finish() ends the session. Call it once, with an honest summary: what you did,
+  what you verified, and anything you could not confirm. If you failed, say so
+  with outcome=failed rather than dressing it up.
+"""
+
+NO_SHELL_NOTE = """
+NO SHELL IN THIS DEPLOYMENT
+  Shell execution is switched off. start() still exists, but it only stands in
+  for the time a command would take - it runs nothing, and its output says so.
+  Do not treat a start() result as evidence that tests passed. To do real work,
+  use list_files, read_file and write_file on the workspace, and verify by
+  reading the code and the tests carefully.
+"""
+
+SANDBOX_NOTE = """
+YOU CAN RUN CODE - IN A SANDBOX
+  Commands run in an isolated Linux container: Python 3.12 with pytest, your
+  workspace mounted as the current directory, no network access (nothing can be
+  installed), 1 GB of memory. Use start() for anything that takes a while - test
+  suites, scripts - and bash() for quick checks. Actually run your tests before
+  you finish, and report the real result: if they fail, fix the code or say so.
+"""
+
+HOST_NOTE = """
+COMMANDS RUN ON THE HOST
+  Shell commands run directly on this machine, unsandboxed. Keep them inside the
+  workspace and never touch anything outside it.
+"""
+
+SPECULATIVE_NOTE = """
+THIS TASK IS SPECULATIVE
+  Nobody asked you for this. You are acting ahead on a signal in the
+  environment, spending background compute on the chance it turns out useful.
+  Stay completely silent unless you both confirm the problem AND have a simple
+  fix. If you cannot, finish() with outcome=discarded and no fanfare. A
+  speculative result that is half-finished is worse than no result at all.
+"""
+
+
+class WorkerAgent:
+    def __init__(
+        self,
+        *,
+        task: Task,
+        session: Session,
+        store: Any,
+        bus: Any,
+        config: Any,
+        client: Any,
+        on_report: Any,
+        on_finish: Any,
+        on_handback: Any,
+        speculative: bool = False,
+        shell: Any = None,
+        resume_note: str | None = None,
+    ) -> None:
+        self.task = task
+        self.session = session
+        self.store = store
+        self.bus = bus
+        self.config = config
+        self.on_report = on_report
+        self.on_finish = on_finish
+        self.on_handback = on_handback
+        self.speculative = speculative
+        self.shell = shell
+        self._job_tasks: dict[str, asyncio.Task] = {}
+
+        self.registry = ToolRegistry()
+        self._register_tools()
+
+        prompt = (
+            SYSTEM_PROMPT
+            + {"docker": SANDBOX_NOTE, "host": HOST_NOTE}.get(
+                getattr(shell, "kind", "simulated"), NO_SHELL_NOTE)
+            + (SPECULATIVE_NOTE if speculative else "")
+        )
+        self.loop = AgentLoop(
+            session=session,
+            client=client,
+            store=store,
+            bus=bus,
+            config=config,
+            system_prompt=prompt,
+            registry=self.registry,
+            role="worker",
+            budget_chars=config.worker_context_budget,
+            max_steps=config.worker_max_steps,
+            # A worker writes whole files as tool arguments; a 2k cap would
+            # truncate the JSON mid-file and break the call.
+            max_tokens=config.worker_max_tokens,
+        )
+
+        # The brief goes into the inbox now, at construction, not at launch. A
+        # queued worker is already subscribed to its thread, so follow-ups can
+        # arrive while it waits; queueing the brief first guarantees it reads
+        # what its task is before it reads "any update on that?".
+        brief = (
+            f'Your task is {self.task.id}: "{self.task.title}"\n\n'
+            f"{self.task.brief}\n\n"
+        )
+        if self.task.thread_id and not speculative:
+            brief += (
+                f"You are subscribed to thread {self.task.thread_id}, so follow-up "
+                f"events on it will arrive here directly.\n\n"
+            )
+        if resume_note:
+            brief += resume_note.rstrip() + "\n\n"
+        brief += "Begin."
+        self.loop.inject(brief, kind="system")
+
+    # ------------------------------------------------------------------ #
+    def start(self) -> None:
+        self.loop.start()
+
+    # ------------------------------------------------------------------ #
+    # tools
+    # ------------------------------------------------------------------ #
+    def _register_tools(self) -> None:
+        reg = self.registry
+        register_recall(reg)
+
+        reg.add(
+            "start",
+            "Begin a time-consuming operation in the background. Returns a job ID "
+            "immediately - it does NOT wait. The result arrives later as an event. "
+            "Use this for builds, test runs, reproductions, long analyses.",
+            obj(
+                command=s("The command or operation to run"),
+                label=s("Short description of what this stage is for", optional=True),
+            ),
+            self._tool_start,
+            background=True,
+        )
+
+        reg.add(
+            "stop",
+            "Stop a background job you started that is taking too long or is no "
+            "longer useful.",
+            obj(job_id=s("Job ID (job_...)"), reason=s("Why", optional=True)),
+            self._tool_stop,
+        )
+
+        reg.add(
+            "report",
+            "Tell the Router something worth knowing before you are finished: real "
+            "progress, a blocker, or a question only a human can answer. Do not "
+            "narrate routine steps.",
+            obj(
+                status=enum("Where the task stands",
+                            ["progressing", "blocked", "needs_decision", "at_risk"]),
+                text=s("The substance, briefly. The Router may pass this to a person."),
+            ),
+            self._tool_report,
+        )
+
+        reg.add(
+            "finish",
+            "End this task. Call it exactly once. The session stops afterwards.",
+            obj(
+                summary=s("What you did, what you verified, what you could not confirm"),
+                outcome=enum("How it ended",
+                             ["done", "failed", "cancelled", "discarded"]),
+            ),
+            self._tool_finish,
+        )
+
+        reg.add(
+            "unsubscribe",
+            "Stop receiving events from a thread that is no longer part of your task.",
+            obj(thread_id=s("Thread ID (thr_...)"), reason=s("Why", optional=True)),
+            self._tool_unsubscribe,
+        )
+
+        reg.add(
+            "subscribe",
+            "Also watch another thread that is relevant to your task - a linked pull "
+            "request, for instance. Its events will then arrive here too.",
+            obj(thread_id=s("Thread ID (thr_...)"), reason=s("Why", optional=True)),
+            self._tool_subscribe,
+        )
+
+        reg.add(
+            "handback",
+            "Give an event back to the Router because it belongs to a different "
+            "task. The Router will route it afresh.",
+            obj(trigger_id=s("Event ID (trg_...)"), reason=s("Why it is not yours")),
+            self._tool_handback,
+        )
+
+        reg.add(
+            "list_files",
+            "List files in the workspace, optionally under a sub-directory.",
+            obj(path=s("Directory relative to the workspace, default '.'", optional=True)),
+            self._tool_list_files,
+        )
+
+        reg.add(
+            "read_file",
+            "Read a file from the workspace.",
+            obj(path=s("Path relative to the workspace")),
+            self._tool_read_file,
+        )
+
+        reg.add(
+            "edit_file",
+            "Replace an exact piece of text in a file - the safe way to change a file "
+            "other clones may also be editing. 'old' must appear exactly once (add "
+            "surrounding lines to make it unique) unless replace_all is true.",
+            obj(path=s("Path relative to the workspace"), old=s("Exact text to replace"),
+                new=s("Replacement text"), replace_all=b("Replace every occurrence")),
+            self._tool_edit_file,
+        )
+
+        reg.add(
+            "write_file",
+            "Create a new file, or replace a whole existing one. Replacing needs "
+            "base_version from your latest read_file, and is refused if the file "
+            "changed since. Prefer edit_file for changes.",
+            obj(path=s("Path relative to the workspace"), content=s("Full file contents"),
+                base_version=s("Version from read_file (omit only for a new file)",
+                               optional=True)),
+            self._tool_write_file,
+        )
+
+        if getattr(self.shell, "kind", "simulated") in {"docker", "host"}:
+            reg.add(
+                "bash",
+                "Run a shell command in the workspace and wait for it. Prefer start() "
+                "for anything slow.",
+                obj(command=s("Command to run"), timeout=s("Seconds, default 60", optional=True)),
+                self._tool_bash,
+            )
+
+    # ------------------------------------------------------------------ #
+    # background jobs: the mechanism behind full duplex (s4.1)
+    # ------------------------------------------------------------------ #
+    async def _tool_start(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        command = str(args.get("command") or "").strip()
+        label = str(args.get("label") or "").strip()
+        if not command:
+            return "No command given."
+
+        job = self.store.put_job(Job(
+            id=new_id("job"), session_id=self.session.id, command=command,
+        ))
+        self.session.pending_jobs.append(job.id)
+        self.store.touch_session(self.session, current_activity=label or command)
+
+        self._job_tasks[job.id] = loop.track_background(self._run_job(job, loop))
+
+        return (
+            f'Started [{job.id}]: "{command}". It is running in the background and '
+            f"this call has already returned - keep working. The result will be "
+            f"delivered to you as an event."
+        )
+
+    async def _run_job(self, job: Job, loop: AgentLoop) -> None:
+        try:
+            status, output = await self.shell.run(job.command, job_id=job.id)
+        except asyncio.CancelledError:
+            # stop() was called, or the session is shutting down. The worker
+            # asked for this, so no completion event is delivered.
+            if job.status == "running":
+                self.store.update_job(job, status="stopped", result="stopped",
+                                      finished_ts=time.time())
+            if job.id in self.session.pending_jobs:
+                self.session.pending_jobs.remove(job.id)
+            self._job_tasks.pop(job.id, None)
+            return
+        except Exception as exc:
+            status, output = "failed", f"{type(exc).__name__}: {exc}"
+
+        self._job_tasks.pop(job.id, None)
+        self.store.update_job(job, status=status, result=output, finished_ts=time.time())
+        if job.id in self.session.pending_jobs:
+            self.session.pending_jobs.remove(job.id)
+        self.store.touch_session(self.session)
+
+        verb = "Job finished" if status == "done" else "Job failed"
+        loop.inject(
+            f'{verb} [{job.id}] after {(job.finished_ts or 0) - job.started_ts:.1f}s.\n'
+            f'command: {job.command}\n'
+            f"output:\n{output[:2000]}",
+            kind="job",
+        )
+
+    async def _tool_stop(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        job_id = str(args.get("job_id") or "").strip()
+        job = self.store.jobs.get(job_id)
+        if job is None or job.session_id != self.session.id:
+            return f'No job "{job_id}" of yours.'
+        if job.status != "running":
+            return f"{job_id} already {job.status}."
+        self.store.update_job(job, status="stopped",
+                              result=str(args.get("reason") or "stopped by the worker"),
+                              finished_ts=time.time())
+        # Actually end the work, not just the bookkeeping.
+        if task := self._job_tasks.pop(job_id, None):
+            task.cancel()
+        if job_id in self.session.pending_jobs:
+            self.session.pending_jobs.remove(job_id)
+        return f"Stopped {job_id}."
+
+    # ------------------------------------------------------------------ #
+    async def _tool_report(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        status = str(args.get("status") or "progressing")
+        text = str(args.get("text") or "").strip()
+        await self.on_report(self, status, text)
+        return "Reported to the Router."
+
+    async def _tool_finish(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        summary = str(args.get("summary") or "").strip()
+        outcome = str(args.get("outcome") or "done")
+        await self.on_finish(self, outcome, summary)
+        loop.request_stop(status="done")
+        return f"Task closed as {outcome}."
+
+    async def _tool_unsubscribe(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        thread_id = str(args.get("thread_id") or "").strip()
+        ok = self.store.unsubscribe(thread_id, self.session.id)
+        return (
+            f"Unsubscribed from {thread_id}; its events will go to the Router again."
+            if ok else f"You were not subscribed to {thread_id}."
+        )
+
+    async def _tool_subscribe(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        thread_id = str(args.get("thread_id") or "").strip()
+        if thread_id not in self.store.threads:
+            return f'No thread "{thread_id}".'
+        self.store.subscribe(thread_id, self.session.id)
+        return f"Subscribed to {thread_id}; its events will now arrive here."
+
+    async def _tool_handback(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        trigger_id = str(args.get("trigger_id") or "").strip()
+        reason = str(args.get("reason") or "not part of this task").strip()
+        if trigger_id not in self.store.triggers:
+            return f'No event "{trigger_id}".'
+        ok = await self.on_handback(self, trigger_id, reason)
+        return (
+            f"Handed {trigger_id} back to the Router, which will route it afresh."
+            if ok else f"Could not hand back {trigger_id}."
+        )
+
+    # ------------------------------------------------------------------ #
+    def _safe_path(self, raw: str) -> Path | None:
+        workspace = Path(self.config.workspace).resolve()
+        candidate = (workspace / raw).resolve()
+        try:
+            candidate.relative_to(workspace)
+        except ValueError:
+            return None
+        return candidate
+
+    async def _tool_list_files(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        root = self._safe_path(str(args.get("path") or "."))
+        if root is None:
+            return "Refused: that path is outside the workspace."
+        if not root.exists():
+            return f"No such directory: {args.get('path') or '.'}"
+        workspace = Path(self.config.workspace).resolve()
+        found = sorted(
+            str(p.relative_to(workspace)).replace("\\", "/")
+            for p in root.rglob("*")
+            if p.is_file() and "__pycache__" not in p.parts and ".pytest_cache" not in p.parts
+        )
+        if not found:
+            return "(no files)"
+        more = f"\n... and {len(found) - 200} more" if len(found) > 200 else ""
+        return "\n".join(found[:200]) + more
+
+    async def _tool_read_file(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        path = self._safe_path(str(args.get("path") or ""))
+        if path is None:
+            return "Refused: that path is outside the workspace."
+        if not path.is_file():
+            return f"No such file: {args.get('path')}"
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return (f"version: {_version(text)}  (pass as base_version to write_file)\n"
+                f"{text[:20000]}")
+
+    # Versions are content hashes, so ANY change - another clone, or a shell
+    # command in the sandbox - makes a stale write fail instead of silently
+    # erasing that change (the lost update the evaluation caught).
+    async def _tool_write_file(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        raw = str(args.get("path") or "")
+        path = self._safe_path(raw)
+        if path is None:
+            return "Refused: that path is outside the workspace."
+        content = str(args.get("content") or "")
+        base = str(args.get("base_version") or "").strip()
+        if path.exists():
+            current = _version(path.read_text(encoding="utf-8", errors="replace"))
+            if not base:
+                return (f"Refused: {raw} already exists. Read it first and pass its version "
+                        f"as base_version - or use edit_file for a targeted change. "
+                        f"Nothing was written.")
+            if base != current:
+                return (f"Refused: {raw} changed since you read it - another clone may have "
+                        f"edited it. Nothing was written. Read it again, merge your changes "
+                        f"into the new content, and retry (or use edit_file).")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return f"Wrote {len(content)} chars to {raw} (new version: {_version(content)})"
+
+    async def _tool_edit_file(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        raw = str(args.get("path") or "")
+        path = self._safe_path(raw)
+        if path is None:
+            return "Refused: that path is outside the workspace."
+        if not path.is_file():
+            return f"No such file: {raw}. Use write_file to create it."
+        old, new = str(args.get("old") or ""), str(args.get("new") or "")
+        if not old:
+            return "Refused: 'old' is empty. Give the exact text to replace."
+        text = path.read_text(encoding="utf-8", errors="replace")
+        count = text.count(old)
+        if count == 0:
+            return (f"Refused: that text is not in {raw} - it may have been changed by "
+                    f"another clone. Read the file again and copy the text exactly.")
+        if count > 1 and not args.get("replace_all"):
+            return (f"Refused: that text appears {count} times in {raw}. Include more "
+                    f"surrounding lines so it is unique, or set replace_all.")
+        text = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
+        path.write_text(text, encoding="utf-8")
+        return f"Edited {raw} (new version: {_version(text)})"
+
+    async def _tool_bash(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        command = str(args.get("command") or "").strip()
+        if not command:
+            return "No command."
+        try:
+            timeout = float(args.get("timeout") or 60)
+        except (TypeError, ValueError):
+            timeout = 60.0
+        _status, output = await self.shell.run(command, timeout=timeout,
+                                               job_id=new_id("job"))
+        return output
+
+
+def _version(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:12]

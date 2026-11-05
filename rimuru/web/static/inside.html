@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rimuru - under the hood</title>
+<link rel="icon" type="image/svg+xml" href="/static/rimuru.svg">
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/inside.css">
+</head>
+<body class="hood-page">
+
+<!-- Same marks and icons as the chat app. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="slime-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B9ECF8"/>
+      <stop offset="0.55" stop-color="#6CC9EC"/>
+      <stop offset="1" stop-color="#2E8FC7"/>
+    </linearGradient>
+    <linearGradient id="clone-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DDF4FB"/>
+      <stop offset="1" stop-color="#93D6F0"/>
+    </linearGradient>
+    <radialGradient id="slime-core" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <path id="slime-shape"
+          d="M32 14 C36.5 14 39.5 17.5 42.5 21.5 C50 26 58 33.5 58 43.5 C58 51.5 52 55.5 44 55.5
+             L20 55.5 C12 55.5 6 51.5 6 43.5 C6 33.5 14 26 21.5 21.5 C24.5 17.5 27.5 14 32 14 Z"/>
+  </defs>
+  <symbol id="mark-rimuru" viewBox="0 0 64 64">
+    <ellipse cx="32" cy="58.5" rx="20" ry="2.6" fill="#0B2A3D" opacity="0.12"/>
+    <use href="#slime-shape" fill="url(#slime-body)"/>
+    <ellipse cx="21" cy="32.5" rx="4" ry="6.8" fill="#FFFFFF" opacity="0.55" transform="rotate(-32 21 32.5)"/>
+    <circle cx="35.5" cy="42" r="8.5" fill="url(#slime-core)" opacity="0.7"/>
+  </symbol>
+  <symbol id="mark-clone" viewBox="0 0 64 64">
+    <ellipse cx="32" cy="58.5" rx="18" ry="2.4" fill="#0B2A3D" opacity="0.08"/>
+    <use href="#slime-shape" fill="url(#clone-body)" stroke="#5DBDE6" stroke-width="2"/>
+    <ellipse cx="21" cy="32.5" rx="3.4" ry="6" fill="#FFFFFF" opacity="0.6" transform="rotate(-32 21 32.5)"/>
+  </symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z M14 3v5h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-beaker" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-5 10a1.5 1.5 0 0 0 1.4 2h11.2a1.5 1.5 0 0 0 1.4-2l-5-10V3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 11v6M12 7.5v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20l4-1 10-10-3-3L5 16l-1 4z M13.5 7.5l3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 17h7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5h14v10H10l-4 4v-4H5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><path d="M4 6h16v12H4z M4 7l8 6 8-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 7v6M12 16.5v.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v4l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M18 7h2M4 17h3M12 17h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15.5" cy="7" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9.5" cy="17" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M15.5 15.5L20 20" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+  <symbol id="i-funnel" viewBox="0 0 24 24"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z" fill="currentColor"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5zM5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><path d="M5 6h7a4 4 0 0 1 0 8H9a3 3 0 0 0 0 6h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="5" cy="6" r="2" fill="currentColor"/><path d="M17 17l2.5 3-2.5 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
+<header class="bar">
+  <a class="brand" href="/" title="Back to the chat">
+    <svg class="mark"><use href="#mark-rimuru"/></svg>
+    <div>
+      <div class="name">Rimuru</div>
+      <div class="tagline">Under the hood</div>
+    </div>
+  </a>
+  <div class="bar-right">
+    <span class="status" id="status" tabindex="0">
+      <span class="status-dot"></span><span id="status-text">Connecting</span>
+      <span class="tip" id="status-tip" role="tooltip"></span>
+    </span>
+    <a class="quiet-link" href="/">Back to the chat</a>
+    <a class="bar-btn" href="/#models" title="Choose which AI does each job">
+      <svg><use href="#i-sliders"/></svg><span>Models</span>
+    </a>
+    <button class="stop" id="stop" disabled title="Stop everything Rimuru is working on">
+      <svg><use href="#i-stop"/></svg><span>Stop</span>
+    </button>
+  </div>
+</header>
+
+<main class="hood">
+  <section class="hood-intro">
+    <h1>How Rimuru works, live</h1>
+    <p>You talk to one assistant, Rimuru. Behind it, <b>clones</b> do the work, each on one
+      job, and a <b>watchdog</b> makes sure they keep moving. This page shows what came in,
+      what Rimuru decided, and who did what. Click anything for the full story.</p>
+  </section>
+
+  <section class="team" id="team" aria-label="Who is working"></section>
+
+  <section class="block">
+    <div class="block-head">
+      <h2>What came in</h2>
+      <span class="hint-icon" tabindex="0" aria-label="About this">
+        <svg><use href="#i-info"/></svg>
+        <span class="tip">Every message from every channel arrives here first. Simple rules
+          drop the obvious noise for free; only what is left is judged by the AI filter.
+          Your own messages in the chat always go straight to Rimuru.</span>
+      </span>
+    </div>
+    <div class="flow" id="flow"></div>
+  </section>
+
+  <div class="hood-grid">
+    <section class="block feed-block">
+      <div class="block-head">
+        <h2>Live</h2>
+        <div class="filters" id="feed-filters" role="tablist" aria-label="Show">
+          <button data-f="all" class="on">Everything</button>
+          <button data-f="decide">Decisions</button>
+          <button data-f="clone">Clones</button>
+          <button data-f="say">What it said</button>
+          <button data-f="filter">Filter</button>
+        </div>
+      </div>
+      <div class="feed" id="feed" aria-live="polite"></div>
+    </section>
+
+    <div class="hood-side">
+      <section class="block">
+        <div class="block-head"><h2>Jobs</h2><span class="count" id="jobs-count"></span></div>
+        <div class="list" id="jobs"></div>
+      </section>
+      <section class="block">
+        <div class="block-head">
+          <h2>Conversations</h2>
+          <span class="hint-icon" tabindex="0" aria-label="About conversations">
+            <svg><use href="#i-info"/></svg>
+            <span class="tip">Messages about the same thing - a chat topic, a pull request -
+              are grouped into one conversation. A clone working on it follows the
+              conversation, so follow-ups reach it directly.</span>
+          </span>
+        </div>
+        <div class="list" id="threads"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="hood-grid even">
+    <section class="block">
+      <div class="block-head"><h2>Memory</h2></div>
+      <h3 class="mini">Things Rimuru chose to remember</h3>
+      <ul class="notes" id="notes"></ul>
+      <h3 class="mini">Look anything up</h3>
+      <p class="muted">Every message, conversation, job and clone has a short ID such as
+        <code>tsk_1a2b3c4d</code>. Rimuru looks things up by ID instead of keeping
+        everything in mind. Click any ID on this page, or paste one:</p>
+      <form class="lookup" id="recall-form">
+        <input id="recall-id" placeholder="Paste an ID" spellcheck="false" aria-label="ID to look up">
+        <button class="ghost" type="submit"><svg><use href="#i-search"/></svg>Look up</button>
+      </form>
+      <pre class="recall-out" id="recall-out" hidden></pre>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Rules for group chats</h2></div>
+      <p class="muted">Your own chat with Rimuru always gets through. For group channels you
+        decide what Rimuru listens to.</p>
+      <div class="rules" id="channel-rules"></div>
+      <h3 class="mini">What the AI filter lets through</h3>
+      <p class="muted">Messages that pass the rules are judged against these instructions.
+        Change them in plain words; they apply from the next message.</p>
+      <div class="policies" id="policies"></div>
+      <form class="lookup" id="policy-form">
+        <input id="policy-text" placeholder="Add an instruction, e.g. Act when someone asks for a release" aria-label="New instruction">
+        <button class="ghost" type="submit">Add</button>
+      </form>
+    </section>
+  </div>
+
+  <div class="hood-grid even">
+    <section class="block">
+      <div class="block-head"><h2>Models and cost</h2>
+        <a class="ghost small" href="/#models">Change models</a></div>
+      <div class="models-now" id="models-now"></div>
+      <h3 class="mini">Tokens used so far</h3>
+      <div class="cost" id="cost"></div>
+      <p class="muted small">Most of what is read comes from the provider's cache, which is
+        cheaper. The noise filter's calls are not counted yet.</p>
+    </section>
+
+    <section class="block">
+      <div class="block-head"><h2>Practice runs</h2></div>
+      <p class="muted">Try Rimuru on a made-up workload: messages come from a script, not
+        from real people. Good for seeing the filter and the clones at work.</p>
+      <div class="practice-now" id="practice-now"></div>
+      <div class="practice" id="practice"></div>
+      <label class="speed">Speed
+        <select id="speed">
+          <option value="1">real time</option>
+          <option value="4" selected>4&times; faster</option>
+          <option value="10">10&times; faster</option>
+        </select>
+        <span class="muted small">Speeds up the messages and the pretend jobs, not the AI.</span>
+      </label>
+    </section>
+  </div>
+</main>
+
+<!-- transcripts -->
+<div class="scrim" id="scrim" hidden></div>
+<section class="panel" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+  <header class="panel-head">
+    <span class="panel-mark" id="drawer-mark"></span>
+    <div class="panel-titles">
+      <h2 id="drawer-title"></h2>
+      <div class="panel-sub" id="drawer-sub"></div>
+    </div>
+    <button class="icon-btn" id="drawer-close" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+  </header>
+  <div class="panel-body" id="drawer-body"></div>
+</section>
+
+<script src="/static/inside.js"></script>
+</body>
+</html>

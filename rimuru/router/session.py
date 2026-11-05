@@ -1,0 +1,405 @@
+"""The Router layer (article s2.1).
+
+One long-lived session that receives human interaction from every entry point.
+All cross-task information and decisions pass through it, so it is the system's
+global sequence point, coordination point and memory.
+
+The single most important property is what it does NOT do: it never executes
+tasks. It has no shell, no file tools, no way to touch a repository. That is a
+deliberate structural constraint rather than a prompt-engineering hope - the
+ablation in s7.1 shows a single session handed a subagent tool will often just
+do the work itself, which is exactly what destroys throughput. Here the Router
+cannot, because the tools do not exist.
+
+Being interaction-only also keeps it cheap: long input, short output, which is
+what makes batching pay off.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from ..agent.loop import AgentLoop
+from ..agent.tools import ToolRegistry, obj, register_recall, s
+from ..context import inline_task, inline_thread
+from ..ids import ROUTER_SESSION_ID, new_id
+from ..models import Session, Task
+from ..recall import spill_digest
+
+# A newer message that changes course, rather than adding to it. Only these make
+# a reply composed before them unsafe to send.
+CORRECTION = re.compile(
+    r"\b(actually|cancel|instead|never ?mind|stop|don'?t|do not|wait|scratch that|"
+    r"forget|rather|no longer|hold on|undo|change of plan)\b", re.IGNORECASE)
+
+SYSTEM_PROMPT = """You are the Router layer of a Super-agent called Rimuru.
+
+You are one continuous entity. Users reach you from several places - group chat,
+email, code review comments, CI - and to them it is always the same agent. They
+must never have to wonder which session holds which fact. You are the system's
+global memory and its only voice.
+
+WHAT YOU DO
+  - Receive every environmental event that has no worker on it already.
+  - Decide: dispatch work, answer, or stay quiet.
+  - Reply to humans. You are the only part of the system that talks to them.
+  - Keep track of how tasks relate to each other, and relay the rare piece of
+    information that genuinely crosses between them.
+
+WHAT YOU NEVER DO
+  - You never carry out the work yourself. You have no shell and no file tools,
+    on purpose. If something needs doing, dispatch it to a worker.
+  - You never break a task into subtasks. Hand over the whole task; the worker
+    plans it. You track tasks, not steps.
+  - You never relay a worker's reasoning or tool output to a human. Workers
+    report conclusions to you; you decide what is worth saying.
+
+BATCHES
+  Several events often arrive together because they queued while you were
+  thinking. Handle all of them in the one turn, each with its own tool call.
+  This is cheaper than taking them one at a time, so do not complain about it.
+
+STAYING QUIET
+  Most events need nothing. Silence is a correct and frequent outcome. Interrupt
+  a person only when you need a decision or a sign-off from them.
+
+CHANNEL MANNERS
+  - Chat (im/discord/telegram/slack): at most 100 words. Short conclusions and
+    direct questions only. Behave like a colleague who respects attention.
+  - GitHub, email, documents: structured and information-dense. Give the
+    background, what changed, and how it was verified.
+
+THE DIRECT CHAT (channel "console")
+  This is a conversation with one person, who may have no technical background.
+  - Plain, warm, short. No jargon, and never show internal IDs (trg_, thr_, wrk_,
+    tsk_, job_) - those are for you, not them.
+  - When you take something on, say in one line what you will do. When work
+    finishes, say what they now have and how to use it. Mention a file name only
+    when it helps them.
+  - Workers are NOT subscribed to this chat - you own it. If the person adds
+    detail about something already in progress, pass it on with message_worker
+    (the worker is shown next to each task). If they ask how it is going, answer
+    from the task state you can see.
+  - Reply with thread_id "console".
+  - Answer first. When the person asks for something, reply in the SAME turn
+    you act on it (reply and dispatch_task can go together), so they never
+    wait through several of your turns before hearing from you.
+
+CONTEXT YOU NO LONGER HOLD
+  Every object has an ID: trg_ (event), thr_ (thread), wrk_ (worker), tsk_ (task).
+  Whatever is injected comes with the IDs of its neighbours. If a person refers
+  to something you cannot see, call recall() on the nearest ID and follow the
+  references outwards until you find it. Do not guess, and do not claim you have
+  lost context - look it up.
+
+  Events on threads a worker already owns go straight to that worker and never
+  enter your window. Call spill() to see what has been happening without you.
+"""
+
+
+class RouterAgent:
+    def __init__(
+        self,
+        *,
+        store: Any,
+        bus: Any,
+        config: Any,
+        client: Any,
+        pool: Any,
+        channels: Any,
+    ) -> None:
+        self.store = store
+        self.bus = bus
+        self.config = config
+        self.pool = pool
+        self.channels = channels
+
+        self.session = store.sessions.get(ROUTER_SESSION_ID) or store.put_session(
+            Session(
+                id=ROUTER_SESSION_ID,
+                kind="router",
+                title="Router (global interaction and dispatch)",
+                model=config.model_for("router"),
+                status="idle",
+            )
+        )
+
+        self.registry = ToolRegistry()
+        self._register_tools()
+
+        self.loop = AgentLoop(
+            session=self.session,
+            client=client,
+            store=store,
+            bus=bus,
+            config=config,
+            system_prompt=SYSTEM_PROMPT,
+            registry=self.registry,
+            role="router",
+            budget_chars=config.router_context_budget,
+            max_steps=0,            # the Router is long-lived and never capped
+            # Room to reason over a merged batch and still call the tools.
+            max_tokens=4096,
+        )
+        # A person's message cuts in on a turn that something else started.
+        self.loop.cut_in = lambda injection: injection.kind == "human"
+
+    # ------------------------------------------------------------------ #
+    def start(self) -> None:
+        self.loop.start()
+        self.store.touch_session(self.session, status="idle")
+
+    def inject(self, text: str, trigger_id: str | None = None) -> None:
+        self.loop.inject(text, kind="event", trigger_id=trigger_id)
+
+    # ------------------------------------------------------------------ #
+    # tools
+    # ------------------------------------------------------------------ #
+    def _register_tools(self) -> None:
+        reg = self.registry
+        register_recall(reg)
+
+        reg.add(
+            "dispatch_task",
+            "Hand a whole task to a new worker with its own isolated context and "
+            "full execution tools. The worker is automatically subscribed to the "
+            "thread the request came from, so follow-ups reach it directly without "
+            "going through you. Use this for anything that needs actual work.",
+            obj(
+                title=s("Short imperative title, e.g. 'fix CSV exporter crash on empty input'"),
+                brief=s("Everything the worker needs: who asked, where, what they said, "
+                        "what done looks like. The worker cannot see your context."),
+                thread_id=s("Thread ID the request came from (thr_...), if any", optional=True),
+                speculative=s("'true' to work in the background without telling anyone, "
+                              "and surface a result only if it succeeds", optional=True),
+            ),
+            self._tool_dispatch,
+        )
+
+        reg.add(
+            "reply",
+            "Say something to the humans on a thread. This is the only way anything "
+            "reaches a person. Respect the channel's manners - chat replies are "
+            "capped at 100 words and the cap is enforced.",
+            obj(
+                thread_id=s("Thread to reply on (thr_...)"),
+                text=s("What to say. Conclusions and direct questions only."),
+            ),
+            self._tool_reply,
+        )
+
+        reg.add(
+            "ignore",
+            "Record that an event needs no action. Use this freely - most events "
+            "need nothing, and saying so explicitly is how you stay quiet.",
+            obj(
+                trigger_id=s("Event being dismissed (trg_...)", optional=True),
+                reason=s("One short phrase"),
+            ),
+            self._tool_ignore,
+        )
+
+        reg.add(
+            "list_tasks",
+            "List current and recent tasks with their status, worker and thread.",
+            obj(status=s("Filter by status: queued|running|done|failed|cancelled", optional=True)),
+            self._tool_list_tasks,
+        )
+
+        reg.add(
+            "stop_task",
+            "Stop a task that is no longer wanted, for instance when the requester "
+            "withdraws it. Identify it by task ID, or by the thread it belongs to.",
+            obj(
+                task_id=s("Task ID (tsk_...)", optional=True),
+                thread_id=s("Or: the thread whose live task should stop (thr_...)",
+                            optional=True),
+                reason=s("Why"),
+            ),
+            self._tool_stop_task,
+        )
+
+        reg.add(
+            "message_worker",
+            "Relay a piece of information to a running worker. Only for things that "
+            "genuinely cross between tasks - workers that share a thread already see "
+            "each other's events without your help.",
+            obj(worker_id=s("Worker session (wrk_...)"), text=s("What it needs to know")),
+            self._tool_message_worker,
+        )
+
+        reg.add(
+            "spill",
+            "Show the events that bypassed you by passing straight through to "
+            "subscribed workers. Use it to catch up on what happened without you.",
+            obj(),
+            self._tool_spill,
+        )
+
+        reg.add(
+            "remember",
+            "Write a durable note to global memory. Use it for facts that outlive "
+            "one task: standing preferences, decisions, who owns what.",
+            obj(note=s("The fact, stated plainly")),
+            self._tool_remember,
+        )
+
+        reg.add(
+            "thread_context",
+            "Read a thread's recent messages. Cheaper than recall when you just "
+            "need to see what was being discussed.",
+            obj(thread_id=s("Thread ID (thr_...)")),
+            self._tool_thread_context,
+        )
+
+    # ------------------------------------------------------------------ #
+    async def _tool_dispatch(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        title = str(args.get("title") or "untitled task").strip()
+        brief = str(args.get("brief") or "").strip()
+        thread_id = str(args.get("thread_id") or "").strip() or None
+        speculative = str(args.get("speculative") or "").lower() in {"true", "yes", "1"}
+
+        if thread_id and thread_id not in self.store.threads:
+            thread_id = None
+
+        origin = None
+        if thread_id and (thread := self.store.threads.get(thread_id)) and thread.trigger_ids:
+            origin = thread.trigger_ids[-1]
+
+        task = self.store.put_task(Task(
+            id=new_id("task"),
+            title=title,
+            brief=brief,
+            thread_id=thread_id,
+            origin_trigger_id=origin,
+        ))
+        worker, started = await self.pool.submit(
+            task, thread_id=thread_id, speculative=speculative
+        )
+
+        mode = "speculatively (nothing is said unless it succeeds)" if speculative else "normally"
+        sub = (f" and subscribed to {thread_id}"
+               if thread_id and not speculative else "")
+        thread = self.store.threads.get(thread_id or "")
+        if thread is not None and thread.channel in self.config.conversation_channels:
+            sub = (" It is NOT subscribed to the chat - relay follow-ups to it with "
+                   "message_worker.")
+        when = ("It is running now." if started else
+                f"All {self.config.max_workers} worker slots are busy, so it is queued "
+                f"and starts when one frees up.")
+        return (
+            f'Dispatched {mode}: {task.id} "{title}" -> worker {worker.id}{sub}. {when}\n'
+            f"Follow-up events on that thread now reach the worker directly. "
+            f"It will report back to you when it has a conclusion."
+        )
+
+    async def _tool_reply(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        thread_id = str(args.get("thread_id") or "").strip()
+        text = str(args.get("text") or "").strip()
+        if not text:
+            return "Nothing to send."
+
+        thread = self.store.threads.get(thread_id)
+        if thread is None and thread_id.startswith("console"):
+            thread = self.store.get_or_create_thread("console", "direct", "direct line")
+        if thread is None:
+            # Never guess. Posting into whichever thread happened to be most
+            # recent would put a reply in front of the wrong people.
+            return (
+                f'No thread "{thread_id}". Pass a thread ID (thr_...), or "console" '
+                f"for the maintainers' direct line. Nothing was sent."
+            )
+
+        # Fresh-reply check. Found in the evaluation: the person said "cancel the
+        # manual" while a reply about the manual was being composed, and the reply
+        # went out anyway. If they wrote again since this turn began AND what they
+        # wrote changes course, hold the reply. A new request on top ("also add
+        # coupons") leaves the reply true, so it goes out - holding those too cost
+        # 25 extra seconds before the first answer in the re-run.
+        newer_note = ""
+        if thread.channel in self.config.conversation_channels and loop.turn_started_ts:
+            newer = [
+                t for t in (self.store.triggers.get(i) for i in thread.trigger_ids)
+                if t is not None and t.kind == "human_direct" and t.ts > loop.turn_started_ts
+            ]
+            corrections = [t for t in newer if CORRECTION.search(t.content)]
+            if corrections:
+                self.bus.emit("router.reply_held", thread_id=thread.id, newer=len(newer))
+                latest = " ".join(corrections[-1].content.split())[:300]
+                return (f'Not sent: the person wrote again while you were thinking: "{latest}". '
+                        f"Their message comes in with this result - answer with it in mind.")
+            if newer:
+                newer_note = ("\nThe person has written again since this turn began; their "
+                              "new message comes in with this result.")
+
+        sent, note = await self.channels.send(thread.channel, thread.key, text)
+        self.bus.emit(
+            "agent.replied", thread_id=thread.id, channel=thread.channel,
+            thread_key=thread.key, text=sent,
+        )
+        return (f"Sent on {thread.channel} {thread.key}: {sent}" + (f"\n({note})" if note else "")
+                + newer_note)
+
+    async def _tool_ignore(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        trigger_id = str(args.get("trigger_id") or "").strip()
+        reason = str(args.get("reason") or "no action needed").strip()
+        if trigger := self.store.triggers.get(trigger_id):
+            trigger.verdict_reason = f"router: {reason}"
+            self.store.put_trigger(trigger)
+        self.bus.emit("router.ignored", trigger_id=trigger_id or None, reason=reason)
+        return f"Noted, no action: {reason}"
+
+    async def _tool_list_tasks(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        wanted = str(args.get("status") or "").strip().lower()
+        tasks = self.store.all_tasks()
+        if wanted:
+            tasks = [t for t in tasks if t.status == wanted]
+        if not tasks:
+            return "No tasks."
+        return "\n".join(
+            inline_task(t, self.store, cap=self.config.inline_content_cap) for t in tasks[:25]
+        )
+
+    async def _tool_stop_task(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        task_id = str(args.get("task_id") or "").strip()
+        thread_id = str(args.get("thread_id") or "").strip()
+        reason = str(args.get("reason") or "no longer needed").strip()
+
+        task = self.store.tasks.get(task_id) if task_id else None
+        if task is None and thread_id:
+            live = [
+                t for t in self.store.all_tasks()
+                if t.thread_id == thread_id and t.status in {"running", "queued"}
+            ]
+            task = live[0] if live else None
+            if task is None:
+                return f"Nothing is running on {thread_id}; there is nothing to stop."
+        if task is None:
+            return f'No task "{task_id}". Call list_tasks to see what is live.'
+        if task.status not in {"running", "queued"}:
+            return f"{task.id} already {task.status}; nothing to stop."
+
+        await self.pool.stop(task, reason=reason)
+        return f'Stopped {task.id} "{task.title}": {reason}'
+
+    async def _tool_message_worker(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        worker_id = str(args.get("worker_id") or "").strip()
+        text = str(args.get("text") or "").strip()
+        ok = self.pool.inject(worker_id, f"Relayed by the Router:\n{text}", kind="human")
+        return f"Delivered to {worker_id}." if ok else f"{worker_id} is not a live worker."
+
+    async def _tool_spill(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        return spill_digest(self.store)
+
+    async def _tool_remember(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        note = str(args.get("note") or "").strip()
+        if not note:
+            return "Nothing to remember."
+        self.store.add_note(note)
+        return f"Remembered. Global memory now holds {len(self.store.notes)} notes."
+
+    async def _tool_thread_context(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        thread = self.store.threads.get(str(args.get("thread_id") or "").strip())
+        if thread is None:
+            return "No such thread."
+        return inline_thread(thread, self.store, cap=self.config.inline_content_cap, recent=10)

@@ -1,0 +1,67 @@
+# Rimuru's models: which AI does which job.
+#
+# Copy this file to config/models.toml and edit it - or skip the file and use
+# the Models button in the app, which writes config/models.toml for you.
+# Nothing about models is fixed in Rimuru's code: you choose every one.
+#
+# [roles] picks a model, by name, for each job:
+#   router    Rimuru itself - talks with you and hands out the work. Fast feels best.
+#   worker    the clones that do the work. Use your most capable model.
+#   watchdog  checks that clones make progress. Optional: uses the router's model.
+#   filter    judges group-chat messages. Optional: uses the router's model.
+#
+# Each [models.<name>] is one model you can use. The name is yours to pick.
+#   provider     kimi | anthropic | openai | deepseek | ollama | custom
+#   model        the model's ID at that provider
+#   base_url     optional; needed for custom (kimi finds its region from the key)
+#   api_key_env  optional; the .env variable holding the key. Defaults:
+#                kimi KIMI_API_KEY, anthropic ANTHROPIC_API_KEY,
+#                openai OPENAI_API_KEY, deepseek DEEPSEEK_API_KEY,
+#                custom CUSTOM_API_KEY; ollama needs none
+#   max_tokens   optional; the longest answer it may write in one go
+#   reasoning    optional; send its reasoning back on later turns (on for kimi)
+#
+# API keys never go in this file - they live in .env, which is never shared.
+
+[roles]
+router = "kimi-fast"
+worker = "kimi-pro"
+# watchdog = "kimi-fast"
+# filter = "kimi-fast"
+
+[models.kimi-fast]
+provider = "kimi"
+model = "kimi-k3.1-pro-highspeed"
+
+[models.kimi-pro]
+provider = "kimi"
+model = "kimi-k3.1-pro"
+
+# More examples - add any of them, then name them in [roles] above.
+
+[models.claude-fast]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+
+[models.claude-strong]
+provider = "anthropic"
+model = "claude-opus-5-5"
+
+[models.gpt]
+provider = "openai"
+model = "your-openai-model-id"
+
+[models.deepseek]
+provider = "deepseek"
+model = "deepseek-chat"
+reasoning = false
+
+[models.local]
+provider = "ollama"
+model = "qwen2.5:7b"
+
+[models.my-server]
+provider = "custom"
+model = "my-model"
+base_url = "http://localhost:8000/v1"
+api_key_env = "MY_SERVER_KEY"

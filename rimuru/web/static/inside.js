@@ -225,10 +225,19 @@
       ["Model", modelOf(o, "router")],
       ["Turns so far", num(o.router.steps)],
       ["Handled several messages in one go", merged.length ? `${merged.length}&times;, up to ${biggest} at once` : "not yet"],
-      ["Your messages cut in on its thinking", o.cut_ins ? `${o.cut_ins}&times;` : "not yet"],
+      ["Your messages cut in on its thinking", cutIns(o)],
       ["Older turns moved out of mind", o.router.spilled_turns ? `${o.router.spilled_turns} (still looked up by ID)` : "none yet"],
     ]));
     showTranscript("rimuru-turns", "rtr_main");
+  }
+
+  // A cut-in abandons the answer Rimuru was writing. Its calls stream, so the
+  // provider stops there - and what had been written is counted.
+  function cutIns(o) {
+    if (!o.cut_ins) return "not yet";
+    const w = o.cut_in_waste || {};
+    if (!w.streamed) return `${o.cut_ins}&times; &middot; ${w.seconds || 0}s of thinking dropped`;
+    return `${o.cut_ins}&times; &middot; about ${num(w.tokens || 0)} tokens thrown away`;
   }
 
   /* ================================================================ clones */
@@ -666,7 +675,8 @@
       case "watchdog.assessed": return ["watch", "eye", `The watchdog checked on the clones${e.note ? `: ${short(e.note, 110)}` : ""}`];
       case "watchdog.escalated": return ["watch", "eye", `The watchdog raised a concern with Rimuru: “${short(e.text, 110)}”`];
       case "watchdog.answer": return ["watch", "eye", `The watchdog answered: “${short(e.text, 220)}”`, null, "said"];
-      case "session.cut_in": return ["decide", "chat", "Your message cut in on Rimuru's thinking, so it answered you first", e.session_id, "good"];
+      case "session.cut_in": return ["decide", "chat", `Your message cut in on Rimuru's thinking, so it answered you first${
+        e.streamed ? ` (the answer it dropped had about ${e.wasted_tokens || 0} tokens)` : ""}`, e.session_id, "good"];
       case "router.reply_held": return ["decide", "pause", "Rimuru held back a reply: you changed course while it was thinking"];
       case "safety.hidden_instructions": {
         const f = (e.found || [])[0] || {};

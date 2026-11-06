@@ -92,6 +92,9 @@ class AgentLoop:
         self._blocked_wait = float(getattr(config, "blocked_retry_seconds", 30.0))
         self._retry_turn = False
         self.cut_ins = 0
+        # What cut-ins threw away: calls abandoned, output already written, time.
+        self.cut_in_waste: dict[str, Any] = {"calls": 0, "chars": 0, "seconds": 0.0,
+                                             "streamed": False}
         self._call: asyncio.Future | None = None
         self._turn_from_person = False
         # The turn in progress: every event it answers (including ones folded in
@@ -249,6 +252,7 @@ class AgentLoop:
         (response, injected, batch_size); response is None when stopping.
         """
         while True:
+            begun = time.monotonic()
             call = asyncio.ensure_future(self.client.complete(
                 system=self.system_prompt,
                 messages=self.messages,
@@ -271,6 +275,17 @@ class AgentLoop:
             extra = await self._drain(block=False)
             self._turn_from_person = True
             self.cut_ins += 1
+            # What the abandoned call cost: the output written before it was cut
+            # (a streamed call stops there; one that cannot stream may run on and
+            # be billed in full - then only the time is known).
+            progress = getattr(self.client, "last_progress", None) or {}
+            streamed = bool(getattr(self.client, "stream", False))
+            wasted = int(progress.get("chars", 0) or 0) if streamed else 0
+            waste = self.cut_in_waste
+            waste["calls"] += 1
+            waste["chars"] += wasted
+            waste["seconds"] += time.monotonic() - begun
+            waste["streamed"] = streamed
             if extra:
                 text = "This arrived while you were thinking:\n" + self._render_batch(extra)
                 last = self.messages[-1]
@@ -282,7 +297,8 @@ class AgentLoop:
                 step.injected, step.batch_size = _clip(injected, 12000), batch_size
             # The fresh-reply check must count the folded-in message as seen.
             self.turn_started_ts = now()
-            self.bus.emit("session.cut_in", session_id=self.session.id, merged=len(extra))
+            self.bus.emit("session.cut_in", session_id=self.session.id, merged=len(extra),
+                          wasted_tokens=wasted // 4, streamed=streamed)
 
     # ------------------------------------------------------------------ #
     # the loop

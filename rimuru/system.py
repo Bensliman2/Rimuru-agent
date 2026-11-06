@@ -500,6 +500,14 @@ class RimuruSystem:
             "models_note": self.provider_note,
             "blocked": [{"provider": p, **info} for p, info in self.blocked.items()],
             "cut_ins": self.router.loop.cut_ins,
+            # Measured on every cut-in: output already written (about 4 characters a
+            # token) and time spent, by a streamed call that then stops.
+            "cut_in_waste": {
+                "calls": self.router.loop.cut_in_waste["calls"],
+                "tokens": self.router.loop.cut_in_waste["chars"] // 4,
+                "seconds": round(self.router.loop.cut_in_waste["seconds"], 1),
+                "streamed": bool(getattr(self.router.loop.client, "stream", False)),
+            },
             "bash_enabled": self.config.enable_bash,
             "shell": {"kind": self.shell.kind, "ready": self.shell.ready,
                       "detail": self.shell.describe()},

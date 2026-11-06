@@ -8,6 +8,7 @@ all of its input should be cache reads. The article tracks exactly this number
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from ..models import Usage
@@ -30,6 +31,21 @@ class AnthropicClient(LLMClient):
         # From the model's entry in config/models.toml, when set there.
         self.max_tokens_override: int | None = None
         self.provider_label = ""
+        # Rimuru's own calls stream, so a person cutting in stops the answer being
+        # written (see OpenAICompatClient.stream); last_progress: how far it got.
+        self.stream = False
+        self.last_progress: dict[str, Any] = {"chars": 0, "started": 0.0}
+
+    async def _streamed(self, payload: dict[str, Any]) -> Any:
+        progress = self.last_progress = {"chars": 0, "started": time.monotonic()}
+        async with self._client.messages.stream(**payload) as stream:
+            async for event in stream:
+                if getattr(event, "type", "") == "content_block_delta":
+                    delta = event.delta
+                    piece = (getattr(delta, "text", None) or getattr(delta, "partial_json", None)
+                             or getattr(delta, "thinking", None) or "")
+                    progress["chars"] += len(piece)
+            return await stream.get_final_message()
 
     _BLOCKS = {"text", "tool_use", "tool_result", "image"}
 
@@ -71,7 +87,8 @@ class AnthropicClient(LLMClient):
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                raw = await self._client.messages.create(**payload)
+                raw = await (self._streamed(payload) if self.stream
+                             else self._client.messages.create(**payload))
                 break
             except Exception as exc:  # transient API failure: the Watchdog also sees these
                 problem = account_problem(getattr(exc, "status_code", None), str(exc))

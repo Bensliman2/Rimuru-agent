@@ -22,4 +22,9 @@ def build_client(config: Config, kind: str, *, speed: float = 1.0) -> LLMClient:
         return MockClient(speed=speed)
     from .catalog import make_client
 
-    return make_client(config.setup.entry_for(kind), concurrency=config.llm_concurrency)
+    client = make_client(config.setup.entry_for(kind), concurrency=config.llm_concurrency)
+    # Only Rimuru itself is cut in on (a person's message stops a turn about
+    # something else), so only its calls stream: closing the stream stops the
+    # provider writing an answer that will be thrown away.
+    client.stream = kind == "router"
+    return client

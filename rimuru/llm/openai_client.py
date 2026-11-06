@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from typing import Any
 
 import httpx
@@ -65,6 +66,13 @@ class OpenAICompatClient(LLMClient):
         # From the model's entry in config/models.toml, when set there.
         self.max_tokens_override: int | None = None
         self.provider_label = ""
+        # Rimuru's own calls stream (llm.build_client): when a person cuts in,
+        # cancelling closes the stream and the provider stops writing, instead of
+        # finishing - and billing - an answer nobody will read. last_progress
+        # says how much had been written when it was cut (AgentLoop._think).
+        self.stream = False
+        self._stream_options = True
+        self.last_progress: dict[str, Any] = {"chars": 0, "started": 0.0}
 
     def _http(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -189,6 +197,114 @@ class OpenAICompatClient(LLMClient):
 
         raise ProviderError(f"gave up after {self.max_attempts} attempts: {last_error}")
 
+    async def _post_stream(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """The same request, streamed, read back into the shape _post returns.
+
+        Errors before the first byte are handled exactly as in _post. A provider
+        that cannot stream (or not with usage counts) is asked again without."""
+        body: dict[str, Any] = {**payload, "stream": True}
+        if self._stream_options:
+            body["stream_options"] = {"include_usage": True}
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        progress = self.last_progress = {"chars": 0, "started": time.monotonic()}
+
+        last_error = "no attempt made"
+        for attempt in range(self.max_attempts):
+            backoff = min(20.0, 1.5 * (2 ** attempt)) + random.uniform(0, 0.5)
+            status, text, retry_after = 0, "", ""
+            try:
+                async with _gate(self.concurrency, self.base_url):
+                    async with self._http().stream("POST", f"{self.base_url}/chat/completions",
+                                                   json=body, headers=headers) as response:
+                        if response.status_code < 400:
+                            return await self._read_stream(response, progress)
+                        status = response.status_code
+                        text = (await response.aread()).decode("utf-8", errors="replace")
+                        retry_after = response.headers.get("retry-after", "")
+            except httpx.TransportError as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                log.warning("%s: %s while streaming, retrying (attempt %d/%d)", self.model,
+                            type(exc).__name__, attempt + 2, self.max_attempts)
+                await asyncio.sleep(backoff)
+                continue
+
+            problem = account_problem(status, text)
+            if problem:
+                raise ProviderAccountError(problem, self.provider_label or
+                                           httpx.URL(self.base_url).host, text[:300])
+            if status == 429 or status >= 500:
+                last_error = f"HTTP {status}: {text[:200]}"
+                log.warning("%s: HTTP %d, retrying (attempt %d/%d)", self.model, status,
+                            attempt + 2, self.max_attempts)
+                try:
+                    wait = float(retry_after or 0)
+                except ValueError:
+                    wait = 0.0
+                await asyncio.sleep(min(60.0, wait or backoff))
+                continue
+            if "stream" in text.lower():
+                if "stream_options" in body:          # no usage counts while streaming here
+                    self._stream_options = False
+                    body.pop("stream_options")
+                    continue
+                self.stream = False                   # this provider does not stream at all
+                return await self._post(payload)
+            raise ProviderError(f"HTTP {status} from {self.base_url} for model "
+                                f"{self.model}: {text[:500]}")
+        raise ProviderError(f"gave up after {self.max_attempts} attempts: {last_error}")
+
+    @staticmethod
+    async def _read_stream(response: httpx.Response, progress: dict[str, Any]) -> dict[str, Any]:
+        """Server-sent chunks -> one chat-completions response: text, reasoning,
+        tool calls arriving in pieces (by index), the finish reason and usage."""
+        content: list[str] = []
+        reasoning: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        finish: str | None = None
+        usage: dict[str, Any] = {}
+        async for line in response.aiter_lines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if chunk.get("error"):
+                raise ProviderError(f"the stream broke off: {str(chunk['error'])[:300]}")
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            for choice in chunk.get("choices") or []:
+                delta = choice.get("delta") or {}
+                if piece := delta.get("content"):
+                    content.append(piece)
+                    progress["chars"] += len(piece)
+                thought = delta.get("reasoning_content") or delta.get("reasoning")
+                if isinstance(thought, str) and thought:
+                    reasoning.append(thought)
+                    progress["chars"] += len(thought)
+                for tc in delta.get("tool_calls") or []:
+                    slot = calls.setdefault(int(tc.get("index", len(calls)) or 0), {
+                        "id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                    fn = tc.get("function") or {}
+                    if tc.get("id"):
+                        slot["id"] = tc["id"]
+                    if fn.get("name") and not slot["function"]["name"]:
+                        slot["function"]["name"] = fn["name"]
+                    if fn.get("arguments"):
+                        slot["function"]["arguments"] += fn["arguments"]
+                        progress["chars"] += len(fn["arguments"])
+                if choice.get("finish_reason"):
+                    finish = choice["finish_reason"]
+        message = {"content": "".join(content), "reasoning_content": "".join(reasoning),
+                   "tool_calls": [calls[i] for i in sorted(calls)]}
+        return {"choices": [{"message": message, "finish_reason": finish}], "usage": usage}
+
     async def complete(
         self,
         *,
@@ -207,7 +323,7 @@ class OpenAICompatClient(LLMClient):
             payload["tools"] = self._tools(tools)
             payload["tool_choice"] = "auto"
 
-        data = await self._post(payload)
+        data = await (self._post_stream(payload) if self.stream else self._post(payload))
 
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message") or {}

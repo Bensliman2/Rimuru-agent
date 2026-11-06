@@ -23,7 +23,10 @@ from fastapi.staticfiles import StaticFiles
 from ..config import CONFIG, ROOT
 from ..llm import catalog
 from ..recall import recall as do_recall
+from .. import connections as conn
 from .. import folders
+from ..channels.github_live import GitHubChannel, Problem as GitHubProblem
+from ..channels.telegram import Problem as TelegramProblem, TelegramChannel
 from .. import memory as long_memory
 from .. import sessions as chats
 from ..ids import new_id
@@ -122,11 +125,20 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
     # the chat app's read models
     # ------------------------------------------------------------------ #
     def session_thread(key: str):
-        return system.store.threads.get(system.store.thread_by_key.get(f"console:{key}", ""))
+        """A session by its key - on the chat page, or a Telegram chat (tg-...)."""
+        by_key = system.store.thread_by_key
+        for channel in sorted(system.config.conversation_channels):
+            if (thread_id := by_key.get(f"{channel}:{key}")) is not None:
+                return system.store.threads.get(thread_id)
+        return None
+
+    def channel_of(key: str) -> str:
+        return "telegram" if key.startswith("tg-") else "console"
 
     def in_session(task, key: str) -> bool:
         thread = system.store.threads.get(task.thread_id or "")
-        return thread is not None and thread.channel == "console" and thread.key == key
+        return (thread is not None and thread.channel in system.config.conversation_channels
+                and thread.key == key)
 
     def session_key(raw: Any) -> str:
         key = str(raw or "").strip()
@@ -176,6 +188,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
                 "last_ts": max([thread.last_ts] + [m["ts"] for m in said]),
                 "working": sum(1 for t in jobs if t.status in {"running", "queued"}),
                 "jobs": len(jobs),
+                "channel": thread.channel,
                 "folder": shown if folder.exists() and any(folder.iterdir()) else None,
                 "folder_abs": str(folder),
             })
@@ -265,7 +278,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         no path - a new folder Rimuru makes for it."""
         key = session_key(payload.get("chat"))
         store = system.store
-        thread = session_thread(key) or store.get_or_create_thread("console", key, chats.UNNAMED)
+        thread = session_thread(key) or store.get_or_create_thread(channel_of(key), key, chats.UNNAMED)
         if busy_in(thread):
             raise HTTPException(409, "This session's clones are still working. Change its "
                                      "folder when they finish, or stop them first.")
@@ -310,6 +323,91 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             raise HTTPException(500, f"Could not open it here ({type(exc).__name__}). "
                                      "Copy the path instead.") from None
         return {"ok": True}
+
+    # ------------------------------------------------------------------ #
+    # connections: Telegram and GitHub (rimuru/connections.py)
+    # ------------------------------------------------------------------ #
+    @app.get("/api/connections")
+    async def connections_status() -> dict[str, Any]:
+        """What is connected and who may give Rimuru work. Tokens are never sent."""
+        return system.connections.status()
+
+    @app.post("/api/connections/telegram")
+    async def telegram_setup(payload: dict[str, Any]) -> dict[str, Any]:
+        conns = system.connections
+        token = str(payload.get("token") or "").strip()
+        if token:
+            if not conn.TELEGRAM_TOKEN_RE.match(token):
+                raise HTTPException(400, "That does not look like a bot token. @BotFather gives one "
+                                         "like 123456789:AAH... - a number, a colon and a long code.")
+            probe = TelegramChannel(token=token, settings=conns.settings, system=system)
+            try:
+                await probe.check()
+            except TelegramProblem as exc:
+                raise HTTPException(400, str(exc)) from None
+            finally:
+                await probe.http.aclose()
+            catalog.set_key(system.config.env_path, conn.TELEGRAM_TOKEN, token)
+        if "groups" in payload:
+            conns.settings.tg["groups"] = bool(payload.get("groups"))
+            conns.settings.save()
+        if token:
+            await conns.restart("telegram")
+        return conns.status()
+
+    @app.post("/api/connections/telegram/people")
+    async def telegram_people(payload: dict[str, Any]) -> dict[str, Any]:
+        settings = system.connections.settings
+        try:
+            if payload.get("allow", True):
+                settings.allow(payload.get("id"), str(payload.get("name") or "")[:60])
+            else:
+                settings.disallow(payload.get("id"))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return system.connections.status()
+
+    @app.post("/api/connections/github")
+    async def github_setup(payload: dict[str, Any]) -> dict[str, Any]:
+        conns = system.connections
+        token = str(payload.get("token") or "").strip()
+        listed = lambda v: v if isinstance(v, list) else re.split(r"[\s,]+", str(v or ""))  # noqa: E731
+        repos = [str(r) for r in listed(payload.get("repos", conns.settings.gh["repos"])) if str(r).strip()]
+        if token and not conn.GITHUB_TOKEN_RE.match(token):
+            raise HTTPException(400, "That does not look like a GitHub token (github_pat_... or ghp_...).")
+        use = token or conn.token(conn.GITHUB_TOKEN)
+        if not use:
+            raise HTTPException(400, "Paste a GitHub token first.")
+        try:
+            conns.settings.set_github(
+                repos=repos, mention=payload.get("mention"),
+                allowed=[str(a) for a in listed(payload.get("allowed", conns.settings.gh["allowed"]))])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        probe = GitHubChannel(token=use, settings=conns.settings, system=system)
+        try:
+            login = await probe.check()
+            for repo in repos:
+                await probe.call("GET", f"/repos/{repo}")
+        except GitHubProblem as exc:
+            raise HTTPException(400, f"{exc} Check the token can see {', '.join(repos) or 'the repositories'}.") from None
+        finally:
+            await probe.http.aclose()
+        if not conns.settings.gh["allowed"]:
+            conns.settings.set_github(repos=repos, allowed=[login])     # you, by default
+        if token:
+            catalog.set_key(system.config.env_path, conn.GITHUB_TOKEN, token)
+        await conns.restart("github")
+        return conns.status()
+
+    @app.delete("/api/connections/{which}")
+    async def disconnect(which: str) -> dict[str, Any]:
+        if which not in {"telegram", "github"}:
+            raise HTTPException(404, "No such connection.")
+        conn.remove_key(system.config.env_path,
+                        conn.TELEGRAM_TOKEN if which == "telegram" else conn.GITHUB_TOKEN)
+        await system.connections.restart(which)
+        return system.connections.status()
 
     @app.post("/api/stop")
     async def stop_everything(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -670,10 +768,13 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         text = str(payload.get("text") or "").strip()
         if not text:
             raise HTTPException(400, "empty message")
+        key = str(payload.get("thread_key") or "direct")
+        # Typed in the app on a Telegram session: it stays that conversation, and
+        # Rimuru's answer goes to Telegram as well.
         trigger = await system.human_message(
             text,
-            channel=str(payload.get("channel") or "console"),
-            thread_key=str(payload.get("thread_key") or "direct"),
+            channel=str(payload.get("channel") or channel_of(key)),
+            thread_key=key,
         )
         return {"ok": True, "trigger_id": trigger.id}
 

@@ -63,6 +63,7 @@
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M18 7h2M4 17h3M12 17h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15.5" cy="7" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9.5" cy="17" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M15.5 15.5L20 20" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5zM5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
   <symbol id="i-funnel" viewBox="0 0 24 24"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
@@ -85,6 +86,9 @@
       <span class="tip" id="status-tip" role="tooltip"></span>
     </span>
     <a class="quiet-link" href="/inside" title="See how Rimuru works: what came in, what it decided, and why">Under the hood</a>
+    <button class="bar-btn" id="connections-btn" title="Talk to Rimuru from Telegram, and let it work on GitHub">
+      <svg><use href="#i-link"/></svg><span>Connections</span>
+    </button>
     <button class="bar-btn" id="models-btn" title="Choose which AI does each job">
       <svg><use href="#i-sliders"/></svg><span>Models</span>
     </button>
@@ -234,6 +238,22 @@
   <footer class="set-foot">
     <button class="primary" id="folders-use">Use this</button>
     <span class="set-note" id="folders-note" role="status"></span>
+  </footer>
+</section>
+
+<!-- connections: Telegram and GitHub -->
+<section class="panel settings" id="connections" role="dialog" aria-modal="true" aria-labelledby="conn-title" hidden>
+  <header class="panel-head">
+    <span class="panel-mark set-mark"><svg><use href="#i-link"/></svg></span>
+    <div class="panel-titles">
+      <h2 id="conn-title">Connections</h2>
+      <div class="panel-sub">Talk to Rimuru from Telegram, and let it work on GitHub. Only people you allow can give it work.</div>
+    </div>
+    <button class="icon-btn" id="conn-close" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+  </header>
+  <div class="panel-body" id="conn-body"><p class="set-file">Loading&hellip;</p></div>
+  <footer class="set-foot">
+    <span class="set-note" id="conn-note" role="status">Tokens are kept in your .env file and never shown again.</span>
   </footer>
 </section>
 

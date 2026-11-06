@@ -93,6 +93,28 @@ Each of these properties has an automated test (`tests/test_sandbox.py`).
 `RIMURU_SHELL=host` runs commands directly on your machine instead - unsandboxed, so
 only use it knowingly.
 
+## Connections: Telegram and GitHub
+
+The **Connections** button (next to Models) connects Rimuru to the outside. Only the
+people you allow can give it work; tokens go into your `.env` and are never shown again.
+
+**Telegram - talk to Rimuru from your phone.** In Telegram, open @BotFather, send
+`/newbot`, and paste the token it gives you into Connections. Then send your bot a
+message: you appear in Connections - click **Allow**. Each private chat is a session
+like any other (listed in the app with a Telegram mark, with its own folder and
+clones), Rimuru's answers go back to Telegram, and the files a job makes are sent to
+you. Anyone else gets "this is a private assistant" - once. Groups are off unless you
+switch them on, and even then only allowed people are heard.
+
+**GitHub - issues and pull requests.** Make a fine-grained token for just the
+repositories you want (Contents, Issues and Pull requests: read and write), paste it,
+and list the repositories. When someone you allow writes `@rimuru` on an issue or a
+pull request, Rimuru answers there, signed as an AI assistant. For a code change, a
+clone works in a copy of the repository on its own branch (`rimuru/issue-N`), and
+when it is done Rimuru opens a **draft** pull request and links it in the thread. It
+never merges. The copy's git folder is kept out of the clone's reach, so nothing a
+clone - or a hostile repository - writes can run on your computer through git.
+
 ## Under the hood
 
 **Under the hood** (the link at the top of the app) shows how Rimuru works, live, in

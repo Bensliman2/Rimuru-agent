@@ -202,9 +202,15 @@ def test_tasks_over_the_worker_limit_are_queued_not_dropped(tmp_path):
     asyncio.run(run())
 
 
-def test_queued_worker_reads_its_brief_before_followups(tmp_path):
+def test_queued_worker_reads_its_brief_before_followups(tmp_path, monkeypatch):
     """Regression: a queued worker got 'any update?' before its own task brief,
     answered the status question, and never started the work."""
+    import random
+
+    # The offline stand-in fails 12% of pretend commands on purpose, and gives up
+    # after two - which made this test about ORDER fail now and then. No dice here.
+    monkeypatch.setattr(random, "random", lambda: 0.99)
+
     async def run():
         system = make_system(tmp_path, max_workers=1)
         await system.start()

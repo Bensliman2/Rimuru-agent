@@ -31,6 +31,7 @@ from .llm import build_client, catalog
 from .llm.base import Msg
 from .models import TERMINAL, Trigger
 from .recall import describe_graph
+from .connections import Connections
 from .safety import notice_for_person
 from .sessions import title_from, title_of
 from .router.filtering import EventFilter
@@ -139,6 +140,9 @@ class RimuruSystem:
         if first is not None and first.title == "direct line":
             first.title = title_of(self.store, first)
             self.store._persist_thread(first)
+
+        # Telegram and GitHub, when their tokens are set (rimuru/connections.py).
+        self.connections = Connections(self)
 
         # Whatever was mid-flight when the process last died.
         self.recovered = self._mark_interrupted()
@@ -291,6 +295,7 @@ class RimuruSystem:
         await self._recover(router_restored=bool(saved))
         self.router.start()
         self.watchdog.start()
+        await self.connections.start()
         self.bus.emit(
             "system.started",
             demo=self.config.is_demo(),
@@ -425,6 +430,7 @@ class RimuruSystem:
                    if notes else ""))))
 
     async def stop(self) -> None:
+        await self.connections.stop()
         self.sim.stop()
         self.watchdog.stop()
         self.router.loop.request_stop(status="stopped")

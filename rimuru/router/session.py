@@ -80,8 +80,13 @@ CHANNEL MANNERS
     direct questions only. Behave like a colleague who respects attention.
   - GitHub, email, documents: structured and information-dense. Give the
     background, what changed, and how it was verified.
+  - Real GitHub (channel "gh", threads like owner/repo#12): only the people the
+    owner allowed reach you there. For a code change, dispatch it on that
+    thread: the clone works in a copy of the repository, and when it is done a
+    draft pull request is opened by itself - link it ("pull request:") in your
+    reply. Nothing is ever merged by you.
 
-THE DIRECT CHAT (channel "console")
+THE DIRECT CHAT (channel "console" - and "telegram", the same person on their phone)
   This is a conversation with one person, who may have no technical background.
   - Only the reply tool reaches the person. Text you write outside a tool call
     is never shown to them, so every answer - even a one-line one - goes
@@ -375,9 +380,14 @@ class RouterAgent:
             thread_id=thread_id,
             origin_trigger_id=origin,
         ))
-        worker, started = await self.pool.submit(
-            task, thread_id=thread_id, speculative=speculative
-        )
+        try:
+            worker, started = await self.pool.submit(
+                task, thread_id=thread_id, speculative=speculative
+            )
+        except Exception as exc:  # noqa: BLE001 - e.g. the repository could not be copied
+            self.store.update_task(task, status="failed", finished_ts=time.time(),
+                                   result=f"could not start: {exc}")
+            return f"Could not start {task.id}: {exc}. Tell whoever asked, plainly."
 
         mode = "speculatively (nothing is said unless it succeeds)" if speculative else "normally"
         sub = (f" and subscribed to {thread_id}"

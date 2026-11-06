@@ -49,6 +49,11 @@ class WorkerPool:
         # While the app shuts down, a clone's loop ending is not its job ending:
         # the job stays "running" so the next start resumes it (system._recover).
         self.shutting_down = False
+        # Per channel, set by the connections (rimuru/connections.py): where a
+        # job works - GitHub: a copy of the repository - and what happens when it
+        # is done - GitHub: a draft pull request; Telegram: the files are sent.
+        self.preparers: dict[str, Any] = {}
+        self.finishers: dict[str, Any] = {}
 
         # Every way a worker loop can end - finish(), a stop, the step cap, a
         # crash - funnels through here, so tasks never get stuck as "running"
@@ -102,6 +107,9 @@ class WorkerPool:
         thread = self.store.threads.get(thread_id or task.thread_id or "")
         if task.folder:                  # resumed after a restart: the same folder as before
             root = Path(task.folder)
+        elif thread is not None and (prepare := self.preparers.get(thread.channel)):
+            root = Path(await prepare(thread, task))
+            self.store.update_task(task, folder=str(root))
         else:
             if is_session(thread, self.config):
                 name_session(self.store, thread, task.title, task.id)
@@ -246,11 +254,22 @@ class WorkerPool:
                 "whether to deliver it, and to whom.\n"
                 if worker.speculative else ""
             )
+            # The channel's own last step (a pull request, files sent) - said with the news.
+            extra = ""
+            thread = self.store.threads.get(task.thread_id or "")
+            finish = self.finishers.get(thread.channel) if thread is not None else None
+            if finish is not None and outcome == "done":
+                try:
+                    extra = await finish(worker, thread, outcome, summary)
+                except Exception as exc:  # noqa: BLE001 - the work is done either way
+                    extra = f"could not finish up on {thread.channel}: {exc}"
             self.router.inject(
                 f'{prefix}Task [{task.id}] "{task.title}" finished as {outcome}.\n'
                 f"worker: {worker.session.id}\n"
                 f"thread: {thread_id}\nchannel: {channel}\n"
-                f"files: {worker.where}/\n\n"
+                f"files: {worker.where}/\n"
+                + (f"{extra}\n" if extra else "") + "\n"
+                f"{summary}\n\n"
                 f"{summary}\n\n"
                 f"Tell whoever asked, in that channel's register.",
                 # Whoever asked is waiting to hear (speculative work may stay quiet).

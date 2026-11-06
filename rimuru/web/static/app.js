@@ -64,7 +64,7 @@
     list.forEach((s) => rows.push(`<button class="session${s.key === state.chat ? " on" : ""}" data-chat="${esc(s.key)}"
         title="${esc(s.title)}">
         <span class="session-title">${esc(s.title)}</span>
-        <span class="session-sub">${s.working ? `<span class="live-dot"></span>${s.working} working &middot; ` : ""}${since(s.last_ts)}</span>
+        <span class="session-sub">${s.channel === "telegram" ? `<span class="via">Telegram</span>` : ""}${s.working ? `<span class="live-dot"></span>${s.working} working &middot; ` : ""}${since(s.last_ts)}</span>
       </button>`));
     $("session-list").innerHTML = rows.join("") ||
       '<p class="session-empty">Your sessions will appear here.</p>';
@@ -452,11 +452,17 @@
   }
   $("panel-close").addEventListener("click", closePanel);
   $("scrim").addEventListener("click", () => {
-    if (!$("folders").hidden) closeFolders();
+    if (!$("connections").hidden) closeConnections();
+    else if (!$("folders").hidden) closeFolders();
     else if (!$("settings").hidden) closeSettings(); else closePanel();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (!$("connections").hidden) {
+      // Escape inside a field must not throw away a token being pasted.
+      if (!(e.target.closest && e.target.closest("#connections input, #connections textarea"))) closeConnections();
+      return;
+    }
     if (!$("folders").hidden) { closeFolders(); return; }
     if ($("settings").hidden) { closePanel(); return; }
     // Escape inside a field only dismisses its suggestions; it must not throw
@@ -856,6 +862,111 @@
     else if (b.id === "f-done") { ev.preventDefault(); finishEdit(); }
     else if (b.id === "f-cancel") { ev.preventDefault(); S.editing = null; renderSettings(); }
   });
+
+  /* ------------------------------------------------------------- connections */
+  // Telegram (chat from your phone) and GitHub (issues and pull requests).
+  // Tokens go in, and are never shown again.
+  const C = { status: null };
+  const cnote = (text, cls) => { const n = $("conn-note"); n.textContent = text || ""; n.className = `set-note ${cls || ""}`; };
+  const STATE = {
+    connected: ["Connected", "ok"], watching: ["Watching", "ok"], starting: ["Starting", ""],
+    problem: ["Problem", "bad"], off: ["Not connected", ""], "waiting for repositories": ["Add a repository", "warn"],
+  };
+  const stateTag = (s) => { const [t, cls] = STATE[s] || [s, ""]; return `<span class="conn-state ${cls}">${esc(t)}</span>`; };
+
+  function renderConnections(st) {
+    C.status = st;
+    const tg = st.telegram, gh = st.github;
+    const people = tg.allowed.length
+      ? `<ul class="conn-people">${tg.allowed.map((p) => `<li><span>${esc(p.name)} <span class="muted">(${esc(p.id)})</span></span>
+          <button class="ghost small" data-tg-remove="${esc(p.id)}">Remove</button></li>`).join("")}</ul>`
+      : `<p class="conn-hint">Nobody yet. Send your bot a message in Telegram, then allow yourself below.</p>`;
+    const strangers = tg.strangers.length
+      ? `<h4 class="conn-sub">Asked to talk to Rimuru</h4><ul class="conn-people">${tg.strangers.map((p) =>
+          `<li><span>${esc(p.name)}${p.username ? ` <span class="muted">@${esc(p.username)}</span>` : ""} <span class="muted">(${esc(p.id)})</span></span>
+          <button class="primary small" data-tg-allow="${esc(p.id)}" data-name="${esc(p.name)}">Allow</button></li>`).join("")}</ul>` : "";
+    $("conn-body").innerHTML = `
+      <section class="conn">
+        <div class="conn-head"><h3>Telegram</h3>${stateTag(tg.state)}</div>
+        <p class="conn-what">Chat with Rimuru from your phone. Each chat is a session here too, with its own folder and clones - and the files a job makes are sent to you.</p>
+        ${tg.problem ? `<p class="form-error">${esc(tg.problem)}</p>` : ""}
+        ${tg.bot ? `<p class="conn-hint">Your bot is <b>${esc(tg.bot)}</b>.</p>` : `
+        <ol class="conn-steps">
+          <li>In Telegram, open <b>@BotFather</b>, send <code>/newbot</code> and answer its two questions.</li>
+          <li>It gives you a token like <code>123456789:AAH...</code> - paste it here and press Connect.</li>
+          <li>Send your new bot a message, then allow yourself below.</li>
+        </ol>`}
+        <div class="conn-row"><input type="password" id="tg-token" autocomplete="off" spellcheck="false"
+            placeholder="${tg.token_set ? "Token saved - paste a new one to change it" : "Bot token"}" aria-label="Telegram bot token">
+          <button class="primary small" data-act="tg-connect">${tg.token_set ? "Change" : "Connect"}</button>
+          ${tg.token_set ? `<button class="ghost small danger" data-act="tg-off">Disconnect</button>` : ""}</div>
+        <h4 class="conn-sub">Who can give it work</h4>${people}${strangers}
+        <label class="conn-check"><input type="checkbox" id="tg-groups" ${tg.groups ? "checked" : ""}>
+          Also answer in Telegram groups (only allowed people are heard)</label>
+      </section>
+      <section class="conn">
+        <div class="conn-head"><h3>GitHub</h3>${stateTag(gh.state)}</div>
+        <p class="conn-what">Rimuru answers on issues and pull requests when someone you allow writes <code>${esc(gh.mention)}</code> - and opens a <b>draft</b> pull request with its work. It never merges.</p>
+        ${gh.problem ? `<p class="form-error">${esc(gh.problem)}</p>` : ""}
+        ${gh.login ? `<p class="conn-hint">Working as <b>${esc(gh.login)}</b>.</p>` : `
+        <ol class="conn-steps">
+          <li>Make a fine-grained token at <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens</a>: only the repositories you want; <b>Contents</b>, <b>Issues</b> and <b>Pull requests</b>: read and write.</li>
+          <li>Paste it, list the repositories, and save.</li>
+        </ol>`}
+        <div class="conn-row"><input type="password" id="gh-token" autocomplete="off" spellcheck="false"
+          placeholder="${gh.token_set ? "Token saved - paste a new one to change it" : "GitHub token"}" aria-label="GitHub token"></div>
+        <label class="conn-field">Repositories to watch - one per line, as owner/name
+          <textarea id="gh-repos" rows="3" spellcheck="false">${esc(gh.repos.join("\n"))}</textarea></label>
+        <label class="conn-field">People whose ${esc(gh.mention)} counts - GitHub usernames (empty: just you)
+          <input id="gh-allowed" spellcheck="false" value="${esc(gh.allowed.join(", "))}"></label>
+        <div class="conn-row"><button class="primary small" data-act="gh-save">Save</button>
+          ${gh.token_set ? `<button class="ghost small danger" data-act="gh-off">Disconnect</button>` : ""}</div>
+      </section>`;
+  }
+
+  async function openConnections() {
+    $("scrim").hidden = false; $("connections").hidden = false;
+    cnote("Tokens are kept in your .env file and never shown again.", "");
+    try { renderConnections(await api("/api/connections")); }
+    catch (e) { $("conn-body").innerHTML = `<p class="form-error">${esc(e.message)}</p>`; }
+  }
+  function closeConnections() {
+    $("connections").hidden = true;
+    if ($("panel").hidden && $("settings").hidden && $("folders").hidden) $("scrim").hidden = true;
+  }
+  async function connAct(promise, done) {
+    cnote("Checking…", "");
+    try { renderConnections(await promise); cnote(done, "ok"); refresh(); }
+    catch (e) { cnote(e.message, "bad"); }
+  }
+  $("conn-body").addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    if (b.dataset.tgAllow) {
+      connAct(post("/api/connections/telegram/people", { id: Number(b.dataset.tgAllow), name: b.dataset.name, allow: true }),
+        "Allowed. They can give Rimuru work now.");
+    } else if (b.dataset.tgRemove) {
+      connAct(post("/api/connections/telegram/people", { id: Number(b.dataset.tgRemove), allow: false }), "Removed.");
+    } else if (b.dataset.act === "tg-connect") {
+      const token = $("tg-token").value.trim();
+      if (!token) { $("tg-token").focus(); return; }
+      connAct(post("/api/connections/telegram", { token }), "Connected. Now send your bot a message.");
+    } else if (b.dataset.act === "gh-save") {
+      connAct(post("/api/connections/github", { token: $("gh-token").value.trim(),
+        repos: $("gh-repos").value, allowed: $("gh-allowed").value }), "Saved. Rimuru is watching.");
+    } else if (b.dataset.act === "tg-off" || b.dataset.act === "gh-off") {
+      const which = b.dataset.act === "tg-off" ? "telegram" : "github";
+      if (!confirm(`Disconnect ${which === "telegram" ? "Telegram" : "GitHub"}? Its token is removed from .env.`)) return;
+      connAct(api(`/api/connections/${which}`, { method: "DELETE" }), "Disconnected.");
+    }
+  });
+  $("conn-body").addEventListener("change", (ev) => {
+    if (ev.target.id === "tg-groups") {
+      connAct(post("/api/connections/telegram", { groups: ev.target.checked }), "Saved.");
+    }
+  });
+  $("connections-btn").addEventListener("click", openConnections);
+  $("conn-close").addEventListener("click", closeConnections);
 
   /* ------------------------------------------------------------- refresh */
   async function refreshChat() {

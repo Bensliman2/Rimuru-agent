@@ -88,7 +88,8 @@ class Config:
 
     # Channels that are one continuous conversation with a person. The Router
     # owns these; workers never subscribe to them.
-    conversation_channels: frozenset = frozenset({"console"})
+    # Telegram private chats are the same kind: the person, on their phone.
+    conversation_channels: frozenset = frozenset({"console", "telegram"})
 
     # --- web ---
     host: str = field(default_factory=lambda: os.environ.get("RIMURU_HOST", "127.0.0.1"))

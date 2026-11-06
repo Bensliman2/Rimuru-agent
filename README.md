@@ -215,7 +215,7 @@ Things only a real model surfaced, all fixed:
 ## For developers
 
 ```bash
-python -m pytest                          # 59 checks, including sandbox safety
+python -m pytest                          # 93 checks, including sandbox safety
 python run.py --demo                      # no AI model at all - an offline stand-in
 python run.py bench --scenario team       # the article's 300-event workload, headless
 python run.py bench --scenario smoke --speed 1   # real-model bug fixing on your models, graded
@@ -234,44 +234,67 @@ from other websites and other host names are refused, because it stores API keys
 
 ## Honest limits
 
-- **Hidden instructions are resisted, not reported.** A README telling AI tools to
-  delete the tests was ignored, but the owner was never told it is there.
-- **Cutting in has a cost.** When your message interrupts Rimuru, the AI call it
-  abandons may still be billed by the provider. The fix was tested offline; it has not
-  yet been measured in a live run.
-- **A resumed job restarts from a summary** of what it had done, not from the exact
-  point it stopped, and only once.
-- No connections to real Discord, Telegram or GitHub yet - the channel interface is
-  ready for them.
-- The remote endpoint daemons of article s5.2 (running the brain in the cloud and the
-  hands on your machines) are not built.
-- No long-term memory beyond the chat history and the Router's notes (s8.1).
-- Inside the sandbox nothing can be installed (no network), so clones work with Python
-  and pytest only.
+What each of the old limits is now, and what is still true:
+
+- **Hidden instructions are reported, not only resisted.** The person is told, in the
+  session's chat, where text aimed at AI tools was found and what it said. The
+  detector is narrow on purpose (no false alarms on ordinary docs about AI), so a
+  cleverly worded instruction can go unreported - the clone still treats it as content.
+- **Cutting in costs little now.** Rimuru's calls stream, so a cut-in stops the answer
+  being written, and Under the hood shows what was thrown away. Measured live (Kilo, a
+  free model): cut in at 2 s, about 95% of the answer was never written. What the
+  provider bills is not visible from here; a provider that cannot stream falls back
+  to a normal call, which may still be billed in full.
+- **Interrupted work resumes exactly where it stopped,** as the same clone, up to 3
+  times. A command that was cut off mid-run is not re-run by itself - the clone is told
+  and decides; a model call that was in flight is asked again.
+- **Telegram and GitHub are connected; Discord, Slack and email are not.** GitHub is
+  read every minute (no webhooks), so an answer can take up to a minute to start;
+  Telegram reads text only; pull requests are drafts and are never merged.
+- **The remote hands are built - the brain in the cloud is not.** Rimuru itself must
+  stay on your computer: the app has no login, so it is never served on the internet.
+  The hands were tested end to end with two programs on one PC, not yet between two
+  real machines.
+- **Long-term memory matches words, not meaning.** A memory comes back when the turn
+  shares words with it (or when it is about you or the session); something that was
+  only true for a while stays until it is changed or forgotten.
+- **The bigger toolbox and on-demand installs are not yet checked live:** Docker
+  Desktop was not running, so the image build and the two sandbox tests for them wait
+  for it. Python packages must have ready-made versions (wheels); nothing is built
+  from source.
+- **When a free AI service's limit runs out,** Rimuru keeps retrying quietly, and the
+  person is not yet told why it went silent (found in the user test).
 
 ## Layout
 
 ```
 rimuru/
   router/        the Router (Rimuru), the filter, routing
-  worker/        clones, the pool, and shell.py (the sandbox)
+  worker/        clones, the pool, files.py (a clone's files) and shell.py (the sandbox)
   watchdog/      the external control loop
   agent/         the asynchronous loop and the tool registry
-  channels/      chat channels, manners, simulated scenarios
+  channels/      chat channels and manners: Telegram, GitHub, simulated scenarios
+  hands/         the remote hands: a session working on another machine
   llm/           catalog.py (which model does which job), Kimi / OpenAI-compatible,
                  Claude, and the offline demo model
   web/           the chat app (static/index.html) and Under the hood (/inside)
   context.py     Inline & Spill
   recall.py      Chain of Recall
-  store.py       durable state, including chat history
+  store.py       durable state: chat history, saved conversations, memories
+  memory.py      long-term memory: what is kept, and what comes back when
+  safety.py      finding hidden instructions aimed at AI tools
+  connections.py who may give Rimuru work on Telegram and GitHub
+  folders.py     picking a session's folder, safely
 config/          models.toml - your models (made by the Models button), and an example
 data/            your own data, never committed:
   rimuru.db        everything Rimuru remembers - chats, jobs, every step
   sessions/        Rimuru's folder for each session that did not pick its own
   practice/        where practice runs play
+  github/          working copies of your repositories, for GitHub work
+  deps/            packages clones installed, one set per work folder
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           59 automated checks
-run.py           serve | bench | verify | trace | eval
+tests/           93 automated checks
+run.py           serve | bench | verify | trace | eval | speed | hands
 ```

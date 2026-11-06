@@ -31,6 +31,7 @@ from .llm import build_client, catalog
 from .llm.base import Msg
 from .models import TERMINAL, Trigger
 from .recall import describe_graph
+from .safety import notice_for_person
 from .sessions import title_from, title_of
 from .router.filtering import EventFilter
 from .router.routing import EventRouter
@@ -125,6 +126,10 @@ class RimuruSystem:
         self._told: set[tuple[str, str]] = set()
         self.bus.on("provider.blocked", self._on_provider_blocked)
         self.bus.on("provider.recovered", self._on_provider_recovered)
+        # Hidden instructions aimed at AI tools: the clone ignores them, and the app
+        # tells the person they are there - once per passage per session.
+        self._hidden_told: set[tuple[str, str]] = set()
+        self.bus.on("safety.hidden_instructions", self._on_hidden)
 
         # The first conversation predates sessions and was called "direct line";
         # name it like every other session, so its folder has a readable name.
@@ -221,6 +226,22 @@ class RimuruSystem:
             text = (f"I can't think right now: {provider} is not accepting the API key. Check it "
                     f"with the Models button, and I will carry on by myself.")
         self.store.add_chat("rimuru", text, chat=key, notice="blocked")
+
+    def _on_hidden(self, event: dict[str, Any]) -> None:
+        found = event.get("found") or []
+        key = self._chat_of(event.get("session_id", ""))
+        if not found or key is None:
+            return              # practice runs, team channels: shown under the hood only
+        snippet = found[0]["snippet"]
+        if (key, snippet.lower()) in self._hidden_told:
+            return
+        self._hidden_told.add((key, snippet.lower()))
+        if any(m.get("notice") == "hidden" and m.get("chat") == key and snippet in m["text"]
+               for m in self.store.chat):
+            return              # already told, before a restart
+        self.store.add_chat("rimuru", notice_for_person(found, event.get("source") or "a file",
+                                                        event.get("job") or ""),
+                            chat=key, notice="hidden")
 
     def _on_provider_recovered(self, event: dict[str, Any]) -> None:
         provider = event.get("provider") or "The AI provider"

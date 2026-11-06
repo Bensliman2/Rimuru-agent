@@ -29,6 +29,7 @@ from ..agent.tools import ToolRegistry, b, enum, obj, register_recall, s
 from ..ids import new_id
 from ..sessions import display
 from ..models import Job, Session, Task
+from ..safety import hidden_instructions, warning_for_model
 
 SYSTEM_PROMPT = """You are a Worker session inside a Super-agent called Rimuru.
 
@@ -382,8 +383,10 @@ class WorkerAgent:
         self.store.touch_session(self.session)
 
         verb = "Job finished" if status == "done" else "Job failed"
+        shown = f"`{job.command[:60]}`"
+        warning = self._scan(output, f"The output of {shown}", f"the output of {shown}")
         loop.inject(
-            f'{verb} [{job.id}] after {(job.finished_ts or 0) - job.started_ts:.1f}s.\n'
+            f'{warning}{verb} [{job.id}] after {(job.finished_ts or 0) - job.started_ts:.1f}s.\n'
             f'command: {job.command}\n'
             f"output:\n{output[:2000]}",
             kind="job",
@@ -486,8 +489,21 @@ class WorkerAgent:
         if not path.is_file():
             return f"No such file: {args.get('path')}"
         text = path.read_text(encoding="utf-8", errors="replace")
-        return (f"version: {_version(text)}  (pass as base_version to write_file)\n"
+        name = path.relative_to(self.root).as_posix()
+        warning = self._scan(text, f"This file ({name})", f"{name} (in {self.where}/)")
+        return (f"{warning}version: {_version(text)}  (pass as base_version to write_file)\n"
                 f"{text[:20000]}")
+
+    def _scan(self, text: str, for_model: str, for_person: str) -> str:
+        """Hidden instructions aimed at AI tools in what this clone reads: tell the
+        person (system._on_hidden, once per passage) and remind the model."""
+        found = hidden_instructions(text)
+        if not found:
+            return ""
+        self.bus.emit("safety.hidden_instructions", session_id=self.session.id,
+                      task_id=self.task.id, thread_id=self.task.thread_id,
+                      source=for_person, job=self.task.title, found=found)
+        return warning_for_model(found, for_model)
 
     # Versions are content hashes, so ANY change - another clone, or a shell
     # command in the sandbox - makes a stale write fail instead of silently
@@ -545,7 +561,8 @@ class WorkerAgent:
             timeout = 60.0
         _status, output = await self.shell.run(command, timeout=timeout,
                                                job_id=new_id("job"), workdir=self.root)
-        return output
+        shown = f"`{command[:60]}`"
+        return self._scan(output, f"The output of {shown}", f"the output of {shown}") + output
 
 
 def _version(text: str) -> str:

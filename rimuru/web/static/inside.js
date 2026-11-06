@@ -605,6 +605,12 @@
       case "watchdog.answer": return ["watch", "eye", `The watchdog answered: “${short(e.text, 220)}”`, null, "said"];
       case "session.cut_in": return ["decide", "chat", "Your message cut in on Rimuru's thinking, so it answered you first", e.session_id, "good"];
       case "router.reply_held": return ["decide", "pause", "Rimuru held back a reply: you changed course while it was thinking"];
+      case "safety.hidden_instructions": {
+        const f = (e.found || [])[0] || {};
+        return [e.session_id ? "clone" : "filter", "alert",
+          `Hidden instructions aimed at AI tools found in ${short(e.source || "something read", 70)} - ignored${
+            f.snippet ? `: “${short(f.snippet, 110)}”` : ""}`, e.session_id || null, "bad"];
+      }
       case "session.error": return ["decide", "alert", `${nameOf(e.session_id) || "Someone"}'s call to the AI failed; it will try again (${short(e.error, 90)})`, e.session_id, "bad"];
       case "session.spilled": return ["decide", "book", `${nameOf(e.session_id)} moved ${e.turns} older turns out of its working memory - they can still be looked up`, e.session_id, "faint"];
       case "speculation.discarded": return ["clone", "pause", `A clone that started early was stopped: ${short(e.reason, 100)}`, e.session_id];

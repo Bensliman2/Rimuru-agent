@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable
 from ..context import inline_trigger
 from ..ids import ROUTER_SESSION_ID
 from ..models import R_PASSTHROUGH, R_ROUTER, V_ACCEPTED, V_CANDIDATE, V_DROPPED_FAST, Trigger
+from ..safety import hidden_instructions
 from ..sessions import UNNAMED
 
 InjectRouter = Callable[[str, str | None], None]
@@ -61,6 +62,12 @@ class EventRouter:
         if thread.title == UNNAMED and trigger.meta.get("thread_title"):
             # A session whose folder was picked before anything was said.
             thread.title = trigger.meta["thread_title"]
+        if trigger.kind != "human_direct" and (found := hidden_instructions(trigger.content)):
+            # Someone else's message trying to give orders to AI tools: Rimuru sees
+            # it flagged (context.inline_trigger), and it shows under the hood.
+            trigger.meta["hidden_instructions"] = found
+            self.bus.emit("safety.hidden_instructions", trigger_id=trigger.id,
+                          source=f"a message from {trigger.author} ({trigger.channel})", found=found)
         self.store.attach_trigger_to_thread(thread, trigger)
         self.store.put_trigger(trigger)
         self.bus.emit("trigger.received", trigger=trigger.to_dict())

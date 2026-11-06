@@ -282,6 +282,10 @@
                                         : mark("clone");
         parts.push(`<button class="event ${m.kind}" data-worker="${esc(m.worker_id || "")}"
           title="See what the clone did">${lead}<span>${label}</span></button>`);
+      } else if (m.role === "install") {
+        // A clone downloaded packages for this session (in a container that cannot see your files).
+        parts.push(`<div class="event memory" title="Downloaded in a separate container that cannot see your files">
+          <svg><use href="#i-file"/></svg><span>Installed for this session: ${esc(m.text)}</span></div>`);
       } else if (m.role === "memory") {
         // Rimuru keeping (or dropping) a lasting fact - visible as it happens.
         parts.push(`<a class="event memory" href="/inside#memory" title="See and change everything Rimuru remembers">

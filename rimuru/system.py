@@ -130,6 +130,8 @@ class RimuruSystem:
         # tells the person they are there - once per passage per session.
         self._hidden_told: set[tuple[str, str]] = set()
         self.bus.on("safety.hidden_instructions", self._on_hidden)
+        # Packages a clone downloads are said in the session's chat.
+        self.bus.on("worker.installed", self._on_installed)
 
         # The first conversation predates sessions and was called "direct line";
         # name it like every other session, so its folder has a readable name.
@@ -226,6 +228,13 @@ class RimuruSystem:
             text = (f"I can't think right now: {provider} is not accepting the API key. Check it "
                     f"with the Models button, and I will carry on by myself.")
         self.store.add_chat("rimuru", text, chat=key, notice="blocked")
+
+    def _on_installed(self, event: dict[str, Any]) -> None:
+        key = self._chat_of(event.get("session_id", ""))
+        if key is not None:
+            kind = "Python" if event.get("kind") == "python" else "Node"
+            self.store.add_chat("install", f"{', '.join(event.get('packages') or [])} ({kind})",
+                                chat=key)
 
     def _on_hidden(self, event: dict[str, Any]) -> None:
         found = event.get("found") or []

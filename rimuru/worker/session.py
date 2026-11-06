@@ -30,6 +30,7 @@ from ..ids import new_id
 from ..sessions import display
 from ..models import Job, Session, Task
 from ..safety import hidden_instructions, warning_for_model
+from .shell import check_packages, deps_dir_for
 
 SYSTEM_PROMPT = """You are a Worker session inside a Super-agent called Rimuru.
 
@@ -81,11 +82,15 @@ NO SHELL IN THIS DEPLOYMENT
 
 SANDBOX_NOTE = """
 YOU CAN RUN CODE - IN A SANDBOX
-  Commands run in an isolated Linux container: Python 3.12 with pytest, your
-  workspace mounted as the current directory, no network access (nothing can be
-  installed), 1 GB of memory. Use start() for anything that takes a while - test
-  suites, scripts - and bash() for quick checks. Actually run your tests before
-  you finish, and report the real result: if they fail, fix the code or say so.
+  Commands run in an isolated Linux container, your workspace mounted as the
+  current directory, 1 GB of memory, no network. Already there: Python 3.12 with
+  pytest, requests, httpx, beautifulsoup4, flask, fastapi, uvicorn, jinja2, numpy,
+  pandas, matplotlib, pillow, openpyxl, pyyaml and sqlalchemy; Node.js 22 with npm.
+  Need something else? install() it (Python from PyPI, Node from npm) - then also
+  list it in requirements.txt or package.json, so the person can run the project
+  without you. Use start() for anything that takes a while - test suites, scripts
+  - and bash() for quick checks. Actually run your tests before you finish, and
+  report the real result: if they fail, fix the code or say so.
 """
 
 HOST_NOTE = """
@@ -149,6 +154,8 @@ class WorkerAgent:
         self.where = display(self.root)
         # A folder the person picked holds their own files, not just Rimuru's.
         self.own_folder = own_folder
+        # Packages installed for this folder live outside it (shell.install).
+        self.deps = deps_dir_for(config, self.root)
         self.session = session
         self.store = store
         self.bus = bus
@@ -348,6 +355,19 @@ class WorkerAgent:
                 obj(command=s("Command to run"), timeout=s("Seconds, default 60", optional=True)),
                 self._tool_bash,
             )
+        if getattr(self.shell, "kind", "simulated") == "docker":
+            reg.add(
+                "install",
+                "Install packages the sandbox does not have yet: Python packages from PyPI "
+                "(ready-made versions only) or Node packages from npm. They are downloaded "
+                "in a separate container that cannot see the person's files, and your "
+                "commands can use them right after. Also list them in requirements.txt or "
+                "package.json.",
+                obj(packages=s("Package names, separated by spaces - e.g. 'requests "
+                               "flask==3.1.0' or 'express lodash@4'"),
+                    kind=enum("Which kind", ["python", "node"])),
+                self._tool_install,
+            )
 
     # ------------------------------------------------------------------ #
     # background jobs: the mechanism behind full duplex (s4.1)
@@ -374,7 +394,8 @@ class WorkerAgent:
 
     async def _run_job(self, job: Job, loop: AgentLoop) -> None:
         try:
-            status, output = await self.shell.run(job.command, job_id=job.id, workdir=self.root)
+            status, output = await self.shell.run(job.command, job_id=job.id, workdir=self.root,
+                                                  deps=self.deps)
         except asyncio.CancelledError:
             # stop() was called, or the session is shutting down. The worker
             # asked for this, so no completion event is delivered.
@@ -563,6 +584,22 @@ class WorkerAgent:
         path.write_text(text, encoding="utf-8")
         return f"Edited {raw} (new version: {_version(text)})"
 
+    async def _tool_install(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        kind = str(args.get("kind") or "python").strip().lower()
+        names = [n for n in re.split(r"[\s,]+", str(args.get("packages") or "").strip()) if n]
+        problem = check_packages(names, kind)
+        if problem:
+            return f"Not installed: {problem}"
+        self.store.touch_session(self.session, current_activity=f"installing {' '.join(names)}")
+        status, output = await self.shell.install(names, kind, self.deps)
+        if status != "done":
+            return f"Could not install them.\n{output[-1500:]}"
+        self.bus.emit("worker.installed", session_id=self.session.id, task_id=self.task.id,
+                      packages=names, kind=kind)
+        return (f"Installed ({kind}): {' '.join(names)}. Your commands can use them now - and "
+                f"list them in {'requirements.txt' if kind == 'python' else 'package.json'}.\n"
+                f"{output[-800:]}")
+
     async def _tool_bash(self, args: dict[str, Any], loop: AgentLoop) -> str:
         command = str(args.get("command") or "").strip()
         if not command:
@@ -572,7 +609,8 @@ class WorkerAgent:
         except (TypeError, ValueError):
             timeout = 60.0
         _status, output = await self.shell.run(command, timeout=timeout,
-                                               job_id=new_id("job"), workdir=self.root)
+                                               job_id=new_id("job"), workdir=self.root,
+                                               deps=self.deps)
         shown = f"`{command[:60]}`"
         return self._scan(output, f"The output of {shown}", f"the output of {shown}") + output
 

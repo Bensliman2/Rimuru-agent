@@ -2,11 +2,15 @@
 
 Three backends:
 
-  docker     An isolated Linux container per command: Python 3.12 + pytest, the
-             workspace mounted as the working directory, no network, a read-only
-             root filesystem, every capability dropped, and caps on memory, CPU
-             and process count. The model's commands can touch the workspace and
-             nothing else. This is the default whenever Docker is available.
+  docker     An isolated Linux container per command: Python 3.12 with common
+             packages and Node.js (sandbox/Dockerfile), the workspace mounted as
+             the working directory, no network, a read-only root filesystem, every
+             capability dropped, and caps on memory, CPU and process count. The
+             model's commands can touch the workspace and nothing else. Packages
+             a job needs beyond those are installed in a SEPARATE container that
+             has the internet but sees only the job's package folder - never the
+             person's files - and arrive in work containers read-only.
+             This is the default whenever Docker is available.
 
   simulated  Runs nothing. Stands in for the time a command would take, and
              says so plainly in its output so a real model never mistakes it
@@ -20,18 +24,53 @@ import asyncio
 import hashlib
 import os
 import random
+import re
 import shutil
 import subprocess
 import threading
 from pathlib import Path
 from typing import Any
 
-SANDBOX_IMAGE = "rimuru-sandbox:py3.12"
+SANDBOX_IMAGE = "rimuru-sandbox:2"          # a new tag rebuilds the image on the next start
 SANDBOX_DIR = Path(__file__).resolve().parents[2] / "sandbox"
 
 
 def _decode(raw: bytes | None) -> str:
     return (raw or b"").decode("utf-8", errors="replace")
+
+
+# --------------------------------------------------------------------------- #
+# packages installed on demand
+# --------------------------------------------------------------------------- #
+# A name and, optionally, a version - never a URL, a path or an option: those
+# could point the installer at anything ("--index-url ...", "git+https://...").
+_PYTHON_PKG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}(\[[A-Za-z0-9_,.-]{1,60}\])?"
+                         r"((==|>=|<=|~=|!=|>|<)[A-Za-z0-9.*+!_-]{1,40})?$")
+_NODE_PKG = re.compile(r"^(@[a-z0-9][a-z0-9._~-]{0,60}/)?[a-z0-9][a-z0-9._~-]{0,80}"
+                       r"(@[A-Za-z0-9.^~<>=*+_-]{1,40})?$")
+
+
+def check_packages(names: list[str], kind: str) -> str | None:
+    """Why these cannot be installed, or None when they can."""
+    if kind not in {"python", "node"}:
+        return 'kind must be "python" or "node".'
+    if not names:
+        return "no package names given."
+    if len(names) > 10:
+        return "at most 10 packages at a time."
+    pattern = _PYTHON_PKG if kind == "python" else _NODE_PKG
+    bad = [n for n in names if not pattern.match(n)]
+    if bad:
+        return (f"{', '.join(bad[:3])} is not a plain package name (with an optional version). "
+                f"URLs, paths and options are not allowed.")
+    return None
+
+
+def deps_dir_for(config: Any, folder: Path) -> Path:
+    """Where the packages installed for work in `folder` are kept - outside it,
+    with Rimuru's data, one set per work folder."""
+    key = hashlib.sha256(str(Path(folder).resolve()).lower().encode()).hexdigest()[:16]
+    return Path(config.db_path).resolve().parent / "deps" / key
 
 
 class SimulatedShell:
@@ -46,7 +85,15 @@ class SimulatedShell:
         return "simulated - nothing actually runs"
 
     async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "",
-                  workdir: Path | None = None) -> tuple[str, str]:
+                  workdir: Path | None = None, deps: Path | None = None) -> tuple[str, str]:
+        if not self.mock:
+            # A real model must never mistake a stand-in for a passing test run -
+            # and must not wait for it either. Found in the user test: with Docker
+            # off, every command still sat 8-30 seconds doing nothing.
+            return "done", (
+                f"$ {command}\n(simulated: shell execution is disabled, so this did "
+                f"NOT run. Nothing was executed and nothing was verified.)"
+            )
         low = command.lower()
         base = 8.0
         if any(w in low for w in ("test", "suite", "verify", "ci")):
@@ -57,14 +104,6 @@ class SimulatedShell:
             base = 14.0
         duration = base * random.uniform(0.7, 1.3) / self.speed
         await asyncio.sleep(duration)
-
-        if not self.mock:
-            # A real model must never mistake a stand-in for a passing test run.
-            return "done", (
-                f"$ {command}\n(simulated: shell execution is disabled, so this did "
-                f"NOT run. It only stood in for {duration:.1f}s of work. Nothing was "
-                f"executed and nothing was verified.)"
-            )
         if random.random() < 0.12:
             return "failed", (
                 f"$ {command}\nexit status 1\nsimulated transient failure after "
@@ -86,7 +125,7 @@ class HostShell:
         return "host - commands run directly on this machine, unsandboxed"
 
     async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "",
-                  workdir: Path | None = None) -> tuple[str, str]:
+                  workdir: Path | None = None, deps: Path | None = None) -> tuple[str, str]:
         cwd = Path(workdir or self.workspace)
         cwd.mkdir(parents=True, exist_ok=True)
         proc = await asyncio.to_thread(
@@ -183,38 +222,87 @@ class DockerShell:
 
         threading.Thread(target=work, name="sandbox-image", daemon=True).start()
 
-    def _args(self, command: str, name: str, workdir: Path | None = None) -> list[str]:
+    def _base(self, name: str, network: str) -> list[str]:
         args = [
             "docker", "run", "--rm", "--name", name,
             "--label", f"rimuru.workspace={self.owner}",
-            "--network", "none",                  # nothing gets in or out
+            "--network", network,
             "--memory", self.memory, "--cpus", self.cpus, "--pids-limit", "256",
-            "--read-only", "--tmpfs", "/tmp:rw,size=256m",
+            "--read-only", "--tmpfs", "/tmp:rw,size=512m",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "-e", "HOME=/tmp", "-e", "PYTHONDONTWRITEBYTECODE=1",
-            # Only this job's folder is visible: the session's own, or the workspace.
-            "-v", f"{Path(workdir or self.workspace).resolve()}:/workspace", "-w", "/workspace",
         ]
         if hasattr(os, "getuid"):
             # On Linux hosts, keep files the container writes owned by the user.
             args += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        return args
+
+    def _args(self, command: str, name: str, workdir: Path | None = None,
+              deps: Path | None = None) -> list[str]:
+        folder = Path(workdir or self.workspace).resolve()
+        # Nothing gets in or out; only this job's folder is visible.
+        args = self._base(name, "none") + ["-v", f"{folder}:/workspace", "-w", "/workspace"]
+        if deps is not None and Path(deps).is_dir():
+            # Packages installed for this folder (install()), read-only.
+            args += ["-v", f"{Path(deps).resolve()}:/deps:ro",
+                     "-e", "PYTHONPATH=/deps/python", "-e", "NODE_PATH=/deps/node/node_modules",
+                     "-e", "PATH=/deps/node/node_modules/.bin:/usr/local/bin:/usr/bin:/bin"]
+            modules = Path(deps) / "node" / "node_modules"
+            own = folder / "node_modules"
+            if modules.is_dir() and not (own.is_dir() and any(own.iterdir())):
+                # Where Node looks first. Not over a project's own node_modules.
+                args += ["-v", f"{modules.resolve()}:/workspace/node_modules:ro"]
         return args + [self.image, "sh", "-c", command]
 
-    async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "",
-                  workdir: Path | None = None) -> tuple[str, str]:
+    def _install_args(self, packages: list[str], kind: str, name: str, deps: Path) -> list[str]:
+        """Has the internet, and sees ONLY the package folder: never the person's
+        files, so nothing it runs can read them. And nothing a package ships runs
+        while installing: Python takes ready-made wheels only, npm runs no scripts."""
+        if kind == "python":
+            command = ["pip", "install", "--no-cache-dir", "--disable-pip-version-check",
+                       "--only-binary=:all:", "--target", "/deps/python", *packages]
+        else:
+            command = ["npm", "install", "--prefix", "/deps/node", "--ignore-scripts",
+                       "--no-audit", "--no-fund", "--registry=https://registry.npmjs.org/", *packages]
+        return (self._base(name, "bridge")
+                + ["-v", f"{Path(deps).resolve()}:/deps", "-w", "/deps", self.image, *command])
+
+    async def _wait_ready(self) -> str | None:
         if not self.ready:
             # First use while the image is still being built: wait for it.
             waited = 0.0
             while not self.ready and not self.error and waited < 900:
                 await asyncio.sleep(1.0)
                 waited += 1.0
-            if not self.ready:
-                return "failed", f"$ {command}\nsandbox unavailable: {self.error or 'image not ready'}"
+        return None if self.ready else (self.error or "image not ready")
 
+    async def install(self, packages: list[str], kind: str, deps: Path, *,
+                      timeout: float = 300.0) -> tuple[str, str]:
+        label = f"install ({kind}): {' '.join(packages)}"
+        problem = check_packages(packages, kind)
+        if problem:
+            return "failed", f"{label}\nnot installed: {problem}"
+        unavailable = await self._wait_ready()
+        if unavailable:
+            return "failed", f"{label}\nsandbox unavailable: {unavailable}"
+        (Path(deps) / kind).mkdir(parents=True, exist_ok=True)
+        name = f"rimuru-install-{os.urandom(4).hex()}"
+        return await self._execute(self._install_args(packages, kind, name, deps), name, label, timeout)
+
+    async def run(self, command: str, *, timeout: float = 600.0, job_id: str = "",
+                  workdir: Path | None = None, deps: Path | None = None) -> tuple[str, str]:
+        unavailable = await self._wait_ready()
+        if unavailable:
+            return "failed", f"$ {command}\nsandbox unavailable: {unavailable}"
         Path(workdir or self.workspace).mkdir(parents=True, exist_ok=True)
         name = f"rimuru-{job_id or os.urandom(4).hex()}"
+        return await self._execute(self._args(command, name, workdir, deps), name,
+                                   f"$ {command}", timeout)
+
+    async def _execute(self, args: list[str], name: str, label: str,
+                       timeout: float) -> tuple[str, str]:
         proc = await asyncio.to_thread(
-            subprocess.Popen, self._args(command, name, workdir),
+            subprocess.Popen, args,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         try:
@@ -228,9 +316,9 @@ class DockerShell:
             proc.kill()
             if isinstance(exc, asyncio.CancelledError):
                 raise
-            return "failed", f"$ {command}\ntimed out after {timeout:.0f}s (container killed)"
+            return "failed", f"{label}\ntimed out after {timeout:.0f}s (container killed)"
         status = "done" if proc.returncode == 0 else "failed"
-        return status, f"$ {command}\nexit status {proc.returncode}\n{_decode(stdout)[:8000]}"
+        return status, f"{label}\nexit status {proc.returncode}\n{_decode(stdout)[:8000]}"
 
 
 def make_shell(config: Any, *, speed: float = 1.0):

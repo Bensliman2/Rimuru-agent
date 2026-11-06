@@ -96,3 +96,24 @@ def test_cleanup_after_a_crash_spares_other_instances(tmp_path):
         assert theirs.cleanup_orphans() == 1
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+
+
+def test_the_toolbox_has_common_packages_and_node(shell):
+    status, out = run(shell, "python -c 'import requests, flask, numpy, pandas, matplotlib; print(\"ok\")'"
+                             " && node -e 'console.log(6*7)' && npm --version")
+    assert status == "done", out
+    assert "ok" in out and "42" in out
+
+
+def test_installed_packages_work_offline_and_the_installer_never_sees_the_files(shell, tmp_path):
+    work, deps = tmp_path / "work", tmp_path / "deps"
+    work.mkdir()
+    (work / "secret.txt").write_text("the person's file")
+    status, out = asyncio.run(shell.install(["six==1.16.0"], "python", deps, timeout=300))
+    assert status == "done", out
+    status, out = asyncio.run(shell.run("python -c 'import six; print(six.__version__)'",
+                                        timeout=60, workdir=work, deps=deps))
+    assert status == "done" and "1.16.0" in out, out
+    # The installer had the internet but no view of the work folder.
+    args = shell._install_args(["six"], "python", "x", deps)
+    assert not any(str(work) in a or a.endswith(":/workspace") for a in args)

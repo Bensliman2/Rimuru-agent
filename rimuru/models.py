@@ -107,8 +107,9 @@ class Task:
     created_ts: float = field(default_factory=now)
     started_ts: float | None = None
     finished_ts: float | None = None
-    attempt: int = 1              # 2 after one automatic resume following a restart
+    attempt: int = 1              # +1 for each automatic resume after a restart
     folder: str = ""              # where its clone worked, even if the session moves later
+    resume_mark: int | None = None  # its clone's step count when last resumed
 
     @property
     def duration(self) -> float | None:

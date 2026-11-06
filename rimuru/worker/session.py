@@ -139,6 +139,7 @@ class WorkerAgent:
         resume_note: str | None = None,
         root: Path | None = None,
         own_folder: bool = False,
+        restore: dict[str, Any] | None = None,
     ) -> None:
         self.task = task
         # Its folder: the session's own, or the practice folder for other work.
@@ -183,6 +184,14 @@ class WorkerAgent:
             # truncate the JSON mid-file and break the call.
             max_tokens=config.worker_max_tokens,
         )
+
+        if restore is not None:
+            # Resumed after a restart: its own conversation, exactly as it was, and
+            # a note on what the restart cut off. No new brief, no summary.
+            self.loop.restore(restore)
+            self.loop.inject(resume_note or "The app restarted; carry on where you were.",
+                             kind="system")
+            return
 
         # The brief goes into the inbox now, at construction, not at launch. A
         # queued worker is already subscribed to its thread, so follow-ups can

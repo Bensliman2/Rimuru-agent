@@ -45,6 +45,9 @@ class WorkerPool:
         self.launched: set[str] = set()
         self.handbacks = 0
         self.router: Any = None            # set once the Router exists
+        # While the app shuts down, a clone's loop ending is not its job ending:
+        # the job stays "running" so the next start resumes it (system._recover).
+        self.shutting_down = False
 
         # Every way a worker loop can end - finish(), a stop, the step cap, a
         # crash - funnels through here, so tasks never get stuck as "running"
@@ -74,16 +77,26 @@ class WorkerPool:
         thread_id: str | None = None,
         speculative: bool = False,
         resume_note: str | None = None,
+        session: Session | None = None,
+        restore: dict[str, Any] | None = None,
     ) -> tuple[Session, bool]:
-        """Create a Worker for a task. Returns (session, started_now)."""
-        session = self.store.put_session(Session(
-            id=new_id("worker"),
-            kind="worker",
-            title=task.title,
-            model=self.config.model_for("worker"),
-            status="queued",
-            task_id=task.id,
-        ))
+        """Create a Worker for a task. Returns (session, started_now).
+
+        With session and restore: the same clone again, after a restart, taking
+        up its saved conversation exactly where it stopped (system._recover)."""
+        if session is not None:
+            session.model = self.config.model_for("worker")
+            session.status = "queued"
+            self.store.put_session(session)
+        else:
+            session = self.store.put_session(Session(
+                id=new_id("worker"),
+                kind="worker",
+                title=task.title,
+                model=self.config.model_for("worker"),
+                status="queued",
+                task_id=task.id,
+            ))
 
         thread = self.store.threads.get(thread_id or task.thread_id or "")
         if task.folder:                  # resumed after a restart: the same folder as before
@@ -109,6 +122,7 @@ class WorkerPool:
             root=root,
             own_folder=bool(thread is not None and getattr(thread, "folder", "")
                             and Path(thread.folder) == root),
+            restore=restore,
         )
         self.workers[session.id] = worker
         self.store.update_task(task, worker_id=session.id, status="queued")
@@ -207,6 +221,7 @@ class WorkerPool:
         self.store.update_task(task, status=status, result=summary, finished_ts=time.time())
         self.store.touch_session(worker.session, status="done", current_activity="")
         self._release_subscriptions(worker)
+        self.store.drop_context(worker.session.id)      # finished: nothing to resume
 
         self.bus.emit(
             "worker.finished", session_id=worker.session.id, task_id=task.id,
@@ -268,8 +283,13 @@ class WorkerPool:
         worker = self.workers.get(event.get("session_id", ""))
         if worker is None:
             return
+        if self.shutting_down:
+            # Found while building exact resume: a normal shutdown used to mark
+            # every running job "failed", so only a crash was ever resumed.
+            return
         self._release_subscriptions(worker)
         task = worker.task
+        self.store.drop_context(worker.session.id)
         if task.status in {"queued", "running"}:
             # The loop ended without finish(): step cap, crash, or API failure.
             reason = worker.session.current_activity or worker.session.status
@@ -289,6 +309,7 @@ class WorkerPool:
         )
         if worker:
             self._release_subscriptions(worker)
+            self.store.drop_context(worker.session.id)
             if worker.session.id in self.launched:
                 worker.loop.request_stop(status="stopped")
             else:
@@ -298,6 +319,7 @@ class WorkerPool:
         self._launch_next()
 
     async def shutdown(self) -> None:
+        self.shutting_down = True
         self.backlog.clear()
         for worker in list(self.workers.values()):
             if worker.session.id in self.launched:

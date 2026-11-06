@@ -101,49 +101,7 @@ def test_records_memory_and_chat_survive_a_restart(tmp_path):
     again.close()
 
 
-def _crash_while_a_clone_works(tmp_path: Path, ask: str | None) -> dict:
-    """Run until a clone is mid-job, then die the way a crash does: the store
-    stops persisting at once and every loop is cancelled without cleanup."""
-    async def run():
-        system = make_system(tmp_path)
-        await system.start()
-        if ask:
-            await system.human_message(ask)
-        deadline = time.time() + 20
-        while time.time() < deadline and not system.pool.live:
-            await asyncio.sleep(0.02)
-        state = {t.id: (t.status, t.attempt, t.worker_id) for t in system.store.tasks.values()}
-        chat = [m["text"] for m in system.store.chat if m["role"] == "rimuru"]
-        system.store.close()
-        return {"tasks": state, "said": chat}
-
-    return asyncio.run(run())
-
-
-def test_a_crash_mid_job_is_picked_up_once_then_stopped(tmp_path):
-    """Regression: after a restart the running job vanished and the person was
-    never told."""
-    first = _crash_while_a_clone_works(tmp_path, "please build a calculator with tests")
-    [(task_id, (status, attempt, worker))] = first["tasks"].items()
-    assert status == "running" and attempt == 1
-
-    second = _crash_while_a_clone_works(tmp_path, None)     # restart: recover, crash again
-    status2, attempt2, worker2 = second["tasks"][task_id]
-    assert attempt2 == 2 and worker2 != worker, "the job was not picked back up"
-    assert any("picked it back up" in s for s in second["said"])
-
-    async def third():
-        system = make_system(tmp_path)
-        assert system.store.sessions[worker].status == "interrupted"
-        await system.start()                                   # interrupted twice now
-        task = system.store.tasks[task_id]
-        said = [m["text"] for m in system.store.chat if m["role"] == "rimuru"]
-        await system.stop()
-        return task, said
-
-    task, said = asyncio.run(third())
-    assert task.status == "failed", "a job that keeps dying must not loop forever"
-    assert any("interrupted again" in s for s in said)
+# Crash and restart recovery: see tests/test_resume.py.
 
 
 # --------------------------------------------------------------------------- #

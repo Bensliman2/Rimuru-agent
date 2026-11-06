@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS notes (ts REAL, note TEXT);
 CREATE TABLE IF NOT EXISTS chat (
     id TEXT PRIMARY KEY, ts REAL, role TEXT, text TEXT, data TEXT
 );
+CREATE TABLE IF NOT EXISTS contexts (session_id TEXT PRIMARY KEY, ts REAL, data TEXT);
 CREATE INDEX IF NOT EXISTS steps_session ON steps(session_id, idx);
 CREATE INDEX IF NOT EXISTS triggers_thread ON triggers(thread_id);
 CREATE INDEX IF NOT EXISTS triggers_ts ON triggers(ts);
@@ -350,6 +351,25 @@ class Store:
 
     def transcript(self, session_id: str) -> list[Step]:
         return self.steps.get(session_id, [])
+
+    # ------------------------------------------------------------------ #
+    # live conversations: what a loop holds in mind right now, saved after every
+    # step so a restart resumes exactly there (system._recover, AgentLoop.restore)
+    # ------------------------------------------------------------------ #
+    def save_context(self, session_id: str, data: dict[str, Any]) -> None:
+        self._write("INSERT OR REPLACE INTO contexts (session_id, ts, data) VALUES (?,?,?)",
+                    (session_id, now(), json.dumps(data, default=str)))
+
+    def load_context(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            if self._closed:
+                return None
+            row = self._conn.execute("SELECT data FROM contexts WHERE session_id = ?",
+                                     (session_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def drop_context(self, session_id: str) -> None:
+        self._write("DELETE FROM contexts WHERE session_id = ?", (session_id,))
 
     # ------------------------------------------------------------------ #
     # tasks

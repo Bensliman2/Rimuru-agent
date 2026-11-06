@@ -103,6 +103,8 @@ class WatchdogAgent:
             budget_chars=40_000,
             max_steps=0,
         )
+        # Its checks are fresh each time: nothing to resume after a restart.
+        self.loop.persist = False
         self._timer: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ #

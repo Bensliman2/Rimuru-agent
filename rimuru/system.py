@@ -275,9 +275,13 @@ class RimuruSystem:
     # ------------------------------------------------------------------ #
     async def start(self) -> None:
         self.started_ts = time.time()
+        # Rimuru's own conversation, saved after every step, comes back as it was.
+        saved = self.store.load_context(self.router.session.id)
+        if saved:
+            self.router.loop.restore(saved)
+        await self._recover(router_restored=bool(saved))
         self.router.start()
         self.watchdog.start()
-        await self._recover()
         self.bus.emit(
             "system.started",
             demo=self.config.is_demo(),
@@ -318,22 +322,59 @@ class RimuruSystem:
         ]
         return "\n".join(lines[-8:])
 
-    async def _recover(self) -> None:
-        """Pick interrupted work back up once; tell the person; brief the Router."""
+    # A job is resumed at most this many times. It is stopped sooner when a
+    # resumed clone got nowhere before the next restart: then the job itself may
+    # be what keeps bringing the app down.
+    MAX_RESUMES = 3
+
+    def _cut_off(self, session) -> list[str]:
+        """Commands of this clone that a restart cut off before they finished."""
+        if session is None:
+            return []
+        steps = self.store.transcript(session.id)
+        since = steps[-1].ts if steps else 0.0
+        return [j.command for j in self.store.jobs.values()
+                if j.session_id == session.id and (
+                    j.status == "interrupted"
+                    or (j.status == "stopped" and j.result == "stopped" and (j.finished_ts or 0) >= since))]
+
+    async def _recover(self, router_restored: bool = False) -> None:
+        """Pick interrupted work back up - the same clone, exactly where it stopped,
+        when its conversation was saved; tell the person; brief the Router."""
         notes: list[str] = []
         for task in self.recovered:
             old = self.store.sessions.get(task.worker_id or "")
             thread = self.store.threads.get(task.thread_id or "")
             in_chat = thread is not None and thread.channel in self.config.conversation_channels
-            if task.attempt >= 2:
-                # Interrupted twice: maybe the job itself is what brings the
-                # process down. Do not loop - stop, and leave it to the person.
+            steps = len(self.store.transcript(old.id)) if old else 0
+            saved = self.store.load_context(old.id) if old else None
+            stuck = task.attempt >= 2 and task.resume_mark is not None and steps <= task.resume_mark
+            if task.attempt > self.MAX_RESUMES or stuck:
+                why = "before it could get anywhere" if stuck else f"{task.attempt} times"
                 self.store.update_task(
                     task, status="failed", finished_ts=time.time(),
-                    result="Interrupted by a restart twice, so not restarted automatically.")
-                said = (f'I was interrupted again while working on "{task.title}", so I have '
-                        f"stopped it for now. Ask me if you still want it.")
-                notes.append(f'[{task.id}] "{task.title}" - interrupted twice, stopped')
+                    result=f"Interrupted by restarts {why}, so not restarted automatically.")
+                said = (f'I was interrupted again while working on "{task.title}" ({why}), so I '
+                        f"have stopped it - it may be what keeps bringing me down. Ask me if you "
+                        f"still want it.")
+                notes.append(f'[{task.id}] "{task.title}" - interrupted again ({why}), stopped')
+            elif saved and old is not None:
+                cut = self._cut_off(old)
+                note = (
+                    "RESUMED AFTER A RESTART\n"
+                    "  The app restarted while you were working. Your conversation is exactly as\n"
+                    "  you left it: carry on from your last step. If your last action was cut off,\n"
+                    "  check whether it took effect before relying on it.\n"
+                    + ("  These commands were cut off and did not finish - run them again if you\n"
+                       "  still need them:\n" + "\n".join(f"    - {c}" for c in cut[:8]) + "\n"
+                       if cut else ""))
+                self.store.update_task(task, attempt=task.attempt + 1, status="queued",
+                                       resume_mark=steps)
+                await self.pool.submit(task, thread_id=task.thread_id, resume_note=note,
+                                       session=old, restore=saved)
+                said = (f'I was restarted while working on "{task.title}", so I picked it back up '
+                        f"exactly where I left off.")
+                notes.append(f'[{task.id}] "{task.title}" - resumed exactly where it stopped')
             else:
                 progress = self._progress_of(old)
                 resume = (
@@ -352,9 +393,17 @@ class RimuruSystem:
                 self.store.add_chat("rimuru", said, chat=thread.key)
             self.bus.emit("task.recovered", task_id=task.id, resumed=task.status != "failed")
 
-        # The Router's own working context did not survive the restart. Seed it
-        # with the recent conversation and the recovered work - without spending
-        # a model call now; it is read as context on the next real turn.
+        if router_restored:
+            # Its conversation is back as it was; it only needs to know what happened.
+            if notes:
+                self.router.loop.messages.append(Msg(role="user", content=(
+                    "[system] The app restarted. Your conversation was saved and is back as it "
+                    "was. Work that was in progress:\n" + "\n".join(f"  {n}" for n in notes)
+                    + "\n\nThe person has already been told about this in the chat.")))
+            return
+
+        # No saved conversation (it predates them): seed the Router with the
+        # recent chat and the recovered work, without spending a model call now.
         recent = [m for m in self.store.chat[-10:] if m["role"] in {"user", "rimuru"}]
         if recent or notes:
             convo = "\n".join(f"  {m['role']}: {m['text'][:240]}" for m in recent)

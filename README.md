@@ -67,9 +67,11 @@ Then open **http://127.0.0.1:8800**.
 - **If your AI provider runs out of credit** or rejects the key, Rimuru says so in
   the chat and in the status at the top, keeps trying quietly, and carries on by
   itself once it works again - no need to ask twice.
-- **Restarts lose nothing.** The chat, every job and its history come back. A job that
-  was running is picked up again, once, and Rimuru tells you so; if it is cut off a
-  second time it stops and says so rather than looping.
+- **Restarts lose nothing.** The chat, every job and its history come back - and so
+  does what Rimuru and each clone had in mind, saved after every step. A job that was
+  running carries on exactly where it stopped, as the same clone, and Rimuru tells you
+  so. One that keeps getting cut off is stopped after 3 resumes (or at once if it got
+  nowhere since the last one) rather than looping.
 
 ## Clones can run code - safely
 

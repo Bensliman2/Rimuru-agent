@@ -101,6 +101,50 @@ class AgentLoop:
         self.turn_events: list[Injection] = []
         self.turn_opened_ts = 0.0
         self.on_turn_end: Callable[[str], Awaitable[None]] | None = None
+        # The live conversation is saved after every step (store.save_context), so
+        # a restart resumes exactly where it stopped - see restore().
+        self.persist = True
+        self._restored_pending: list[dict[str, Any]] | None = None
+        self._resume_input = ""
+
+    # ------------------------------------------------------------------ #
+    # saved conversations: resuming exactly where a restart cut in
+    # ------------------------------------------------------------------ #
+    def _save(self, pending: list[dict[str, Any]] | None) -> None:
+        if not self.persist:
+            return
+        try:
+            self.store.save_context(self.session.id, {
+                "messages": [{"role": m.role, "content": m.content} for m in self.messages],
+                "pending": pending,
+            })
+        except Exception as exc:  # noqa: BLE001 - losing a save must not stop the work
+            self.bus.emit("session.error", session_id=self.session.id, consecutive=0,
+                          error=f"could not save the conversation: {type(exc).__name__}: {exc}")
+
+    def restore(self, saved: dict[str, Any]) -> None:
+        """Take up a saved conversation exactly where it stopped.
+
+        Three ways a restart can cut in: after tools ran but before the model saw
+        their results (they are sent now); while tools were running (each gets a
+        result saying it was cut off - the model checks before relying on it); or
+        while the model was thinking (it is asked again)."""
+        self.messages = [Msg(role=m["role"], content=m["content"]) for m in saved.get("messages") or []]
+        last = self.messages[-1] if self.messages else None
+        calls = ([b for b in last.content if isinstance(b, dict) and b.get("type") == "tool_use"]
+                 if last is not None and last.role == "assistant" and isinstance(last.content, list)
+                 else [])
+        if saved.get("pending"):
+            self._restored_pending = list(saved["pending"])
+        elif calls:
+            self._restored_pending = [{
+                "type": "tool_result", "tool_use_id": b.get("id", ""),
+                "content": ("(Cut off: the system restarted while this was running. It may or "
+                            "may not have taken effect - check before relying on it.)"),
+            } for b in calls]
+        elif last is not None and last.role == "user":
+            self._retry_turn = True                    # never answered: think again
+            self._resume_input = last.as_text()
 
     # ------------------------------------------------------------------ #
     # lifecycle
@@ -241,7 +285,11 @@ class AgentLoop:
     # the loop
     # ------------------------------------------------------------------ #
     async def _run(self) -> None:
-        pending_results: list[dict[str, Any]] | None = None
+        # A restored conversation may resume with tool results to send, or with
+        # its last input to think about again (restore()).
+        pending_results: list[dict[str, Any]] | None = self._restored_pending
+        self._restored_pending = None
+        injected, batch_size = self._resume_input, 0
         # Continue the numbering after a restart instead of starting at 0 again.
         step_index = len(self.store.transcript(self.session.id))
 
@@ -392,6 +440,9 @@ class AgentLoop:
                     assistant_blocks.insert(0, {"type": "reasoning", "text": response.thinking})
                 if assistant_blocks:
                     self.messages.append(Msg(role="assistant", content=assistant_blocks))
+                # Saved before the tools run: a restart while they run is resumed
+                # with each one marked as cut off (restore()).
+                self._save(None)
 
                 self.last_step_ts = now()
                 self.last_activity_ts = now()
@@ -436,6 +487,8 @@ class AgentLoop:
 
                 self.store.add_step(step)
                 step_index += 1
+                if pending_results is not None:
+                    self._save(pending_results)     # results the model has not seen yet
 
                 # The turn is over unless the model ran out of room mid-thought
                 # (it is asked to act again above, so its text is not final).

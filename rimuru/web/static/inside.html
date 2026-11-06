@@ -268,9 +268,23 @@
           reported and the files it changed.</p></div>
       </section>
     </div>
-    <section class="block">
-      <div class="block-head"><h2>Things Rimuru chose to remember</h2></div>
-      <ul class="notes" id="notes"></ul>
+    <section class="block" id="remembers">
+      <div class="block-head"><h2>What Rimuru remembers</h2>
+        <span class="hint-icon" tabindex="0" aria-label="About Rimuru's memory"><svg><use href="#i-info"/></svg>
+          <span class="tip">Rimuru keeps lasting facts - about you, about each session's work, and
+            anything worth knowing later - and uses them by itself in later sessions. Change or
+            forget any of them here. Passwords and keys are never kept.</span></span>
+      </div>
+      <form class="mem-add" id="mem-add" autocomplete="off">
+        <input id="mem-add-text" maxlength="500" aria-label="Something for Rimuru to remember"
+               placeholder="Tell Rimuru something to remember, for example: I like dark designs">
+        <select id="mem-add-about" aria-label="What it is about">
+          <option value="you">About me</option><option value="general">General</option>
+        </select>
+        <button class="ghost" type="submit">Remember</button>
+      </form>
+      <p class="mem-note" id="mem-note" role="status"></p>
+      <div id="mem-groups"></div>
     </section>
   </section>
 

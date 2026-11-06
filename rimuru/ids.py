@@ -17,6 +17,7 @@ PREFIXES = {
     "watchdog": "wdg",
     "step": "stp",
     "job": "job",
+    "memory": "mem",
 }
 
 KIND_BY_PREFIX = {v: k for k, v in PREFIXES.items()}

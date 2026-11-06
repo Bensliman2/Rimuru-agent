@@ -24,7 +24,10 @@ from ..config import CONFIG, ROOT
 from ..llm import catalog
 from ..recall import recall as do_recall
 from .. import folders
+from .. import memory as long_memory
 from .. import sessions as chats
+from ..ids import new_id
+from ..models import Memory
 from ..system import RimuruSystem
 from . import friendly
 
@@ -201,7 +204,8 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         router = system.router
         busy = router.session.status in {"thinking", "tool"} or router.loop.inbox.qsize() > 0
         last_said = next((m for m in reversed(store.chat)
-                          if m.get("chat", chats.DEFAULT) == chat), None)
+                          if m.get("chat", chats.DEFAULT) == chat and m["role"] in {"user", "rimuru"}),
+                         None)
         age = time.time() - last_said["ts"] if last_said else 1e9
         unanswered = bool(last_said and last_said["role"] == "user" and age < 90)
         return {"messages": items, "thinking": unanswered and (busy or age < 10)}
@@ -543,12 +547,63 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
                                   "title": " ".join(trigger.content.split())[:120],
                                   "sub": f"Message from {trigger.author} \u00b7 {label.get(trigger.channel, trigger.channel)}",
                                   "ts": trigger.ts})
-        for note in store.notes:
-            if found(note["note"]):
-                items.append({"kind": "note", "id": None, "title": note["note"],
-                              "sub": "Something Rimuru chose to remember", "ts": note["ts"]})
+        for mem in store.memories.values():
+            if found(mem.text):
+                items.append({"kind": "note", "id": None, "title": mem.text,
+                              "sub": "Something Rimuru remembers", "ts": mem.created_ts})
         items.sort(key=lambda i: i["ts"], reverse=True)
         return {"items": items[:limit], "total": len(items)}
+
+    # ------------------------------------------------------------------ #
+    # long-term memory: the person sees, adds, changes and deletes it all
+    # ------------------------------------------------------------------ #
+    def memory_title(key: str) -> str:
+        thread = session_thread(key)
+        return chats.title_of(system.store, thread) if thread is not None else "A session"
+
+    @app.get("/api/memories")
+    async def memories() -> dict[str, Any]:
+        return {"groups": long_memory.groups(system.store, memory_title),
+                "count": len(system.store.memories)}
+
+    def memory_text(payload: dict[str, Any]) -> str:
+        text = " ".join(str(payload.get("text") or "").split())
+        if not text:
+            raise HTTPException(400, "Write what Rimuru should remember.")
+        if len(text) > 500:
+            raise HTTPException(400, "Keep it to one fact - 500 characters at most.")
+        if long_memory.looks_secret(text):
+            raise HTTPException(400, "That looks like a password or a key. Rimuru never keeps those.")
+        return text
+
+    @app.post("/api/memories")
+    async def add_memory(payload: dict[str, Any]) -> dict[str, Any]:
+        text = memory_text(payload)
+        about = str(payload.get("about") or "you")
+        key = ""
+        if about == "session":
+            key = session_key(payload.get("chat"))
+        elif about not in {"you", "general"}:
+            about = "you"
+        mem = system.store.put_memory(Memory(id=new_id("memory"), text=text, about=about,
+                                             session_key=key, source="you"))
+        return {"ok": True, "memory": mem.to_dict()}
+
+    @app.put("/api/memories/{memory_id}")
+    async def edit_memory(memory_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        mem = system.store.memories.get(memory_id)
+        if mem is None:
+            raise HTTPException(404, "No such memory.")
+        mem.text = memory_text(payload)
+        mem.source = "you"
+        system.store.put_memory(mem)
+        return {"ok": True, "memory": mem.to_dict()}
+
+    @app.delete("/api/memories/{memory_id}")
+    async def delete_memory(memory_id: str) -> dict[str, Any]:
+        if system.store.delete_memory(memory_id) is None:
+            raise HTTPException(404, "No such memory.")
+        return {"ok": True}
 
     @app.get("/api/batching")
     async def batching(window: int = 8) -> dict[str, Any]:

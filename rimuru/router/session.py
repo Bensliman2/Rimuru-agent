@@ -21,10 +21,11 @@ import time
 from typing import Any
 
 from ..agent.loop import AgentLoop
-from ..agent.tools import ToolRegistry, obj, register_recall, s
+from ..agent.tools import ToolRegistry, enum, obj, register_recall, s
 from ..context import inline_task, inline_thread
 from ..ids import ROUTER_SESSION_ID, new_id
-from ..models import Session, Task
+from .. import memory
+from ..models import Memory, Session, Task
 from ..recall import spill_digest
 
 # People judge an assistant by how fast they get something that works
@@ -114,6 +115,18 @@ CONTEXT YOU NO LONGER HOLD
 
   Events on threads a worker already owns go straight to that worker and never
   enter your window. Call spill() to see what has been happening without you.
+
+LONG-TERM MEMORY
+  You remember across sessions and restarts. When you learn something lasting,
+  call remember() - one fact per call, in plain words:
+    about="you"      the person: their name, what they like, how they want things done
+    about="session"  this session's work: names, where things are, decisions made
+    about="general"  anything else worth knowing later
+  Do not remember passing chatter, things true only today, or anything secret
+  (passwords, keys) - secrets are refused. What you remember comes back to you
+  with the turns where it may matter: use it, without being asked. If the person
+  says a memory is wrong, forget() it and remember the right thing. They can see
+  every memory you make, and change or delete any of them.
 """
 
 
@@ -169,6 +182,11 @@ class RouterAgent:
         # An answer written but never sent still reaches the person (_after_turn).
         self.loop.on_turn_end = self._after_turn
         self._replied_ts = 0.0
+        # What it remembers that may matter comes with each new turn - each
+        # memory once per stretch of context (_memories_for).
+        self.loop.annotate = self._memories_for
+        self._shown: set[str] = set()
+        self._shown_spill = 0
 
     # ------------------------------------------------------------------ #
     def start(self) -> None:
@@ -309,10 +327,18 @@ class RouterAgent:
 
         reg.add(
             "remember",
-            "Write a durable note to global memory. Use it for facts that outlive "
-            "one task: standing preferences, decisions, who owns what.",
-            obj(note=s("The fact, stated plainly")),
+            "Keep a lasting fact in long-term memory, one per call: about the person, "
+            "about this session's work, or general. The person sees it being kept.",
+            obj(text=s("The fact, stated plainly"),
+                about=enum("Who or what it is about", ["you", "session", "general"]),
+                thread_id=s("For about=session: the session's thread (thr_...)", optional=True)),
             self._tool_remember,
+        )
+        reg.add(
+            "forget",
+            "Delete a memory that is wrong or no longer true (its mem_ ID).",
+            obj(memory_id=s("The memory's ID, mem_...")),
+            self._tool_forget,
         )
 
         reg.add(
@@ -480,12 +506,65 @@ class RouterAgent:
     async def _tool_spill(self, args: dict[str, Any], loop: AgentLoop) -> str:
         return spill_digest(self.store)
 
+    # ------------------------------------------------------------------ #
+    # long-term memory (rimuru/memory.py)
+    # ------------------------------------------------------------------ #
+    def _memories_for(self, batch: list[Any]) -> str:
+        if self.loop.spilled_turns != self._shown_spill:
+            # Older turns left the window, and the memories shown in them with it.
+            self._shown.clear()
+            self._shown_spill = self.loop.spilled_turns
+        text = "\n".join(i.text for i in batch)
+        conv = self.config.conversation_channels
+        keys = {th.key for t in re.findall(r"thr_[0-9a-f]+", text)
+                if (th := self.store.threads.get(t)) is not None and th.channel in conv}
+        picked = memory.relevant(self.store.memories.values(), text=text, session_keys=keys,
+                                 exclude=self._shown)
+        if not picked:
+            return ""
+        for m in picked:
+            self._shown.add(m.id)
+            m.used_ts, m.uses = time.time(), m.uses + 1
+            self.store.put_memory(m, quiet=True)
+        return memory.for_router(picked)
+
+    def _session_for(self, args: dict[str, Any], loop: AgentLoop) -> Any:
+        thread = self.store.threads.get(str(args.get("thread_id") or "").strip())
+        if thread is None:
+            thread = self.store.threads.get(self._session_of_this_turn(loop) or "")
+        return thread if thread is not None and thread.channel in self.config.conversation_channels else None
+
+    def _show_in_chat(self, thread: Any, text: str, **extra: Any) -> None:
+        if thread is not None:
+            self.store.add_chat("memory", text, chat=thread.key, **extra)
+
     async def _tool_remember(self, args: dict[str, Any], loop: AgentLoop) -> str:
-        note = str(args.get("note") or "").strip()
-        if not note:
+        text = " ".join(str(args.get("text") or args.get("note") or "").split())
+        if not text:
             return "Nothing to remember."
-        self.store.add_note(note)
-        return f"Remembered. Global memory now holds {len(self.store.notes)} notes."
+        if memory.looks_secret(text):
+            return "Not remembered: it looks like a secret (a key or a password). Those are never kept."
+        about = str(args.get("about") or "general").strip().lower()
+        about = about if about in {"you", "session", "general"} else "general"
+        thread = self._session_for(args, loop)
+        key = thread.key if (about == "session" and thread is not None) else ""
+        if about == "session" and not key:
+            about = "general"
+        for old in self.store.memories.values():
+            if memory.same(old.text, text) and old.about == about and old.session_key == key:
+                return f"Already remembered [{old.id}]."
+        kept = self.store.put_memory(Memory(id=new_id("memory"), text=text[:500], about=about,
+                                            session_key=key))
+        self._shown.add(kept.id)                 # it is in this turn already
+        self._show_in_chat(thread, kept.text, memory_id=kept.id)
+        return f"Remembered [{kept.id}] ({memory.ABOUT[about] or 'general'})."
+
+    async def _tool_forget(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        gone = self.store.delete_memory(str(args.get("memory_id") or "").strip())
+        if gone is None:
+            return "No such memory. Nothing was forgotten."
+        self._show_in_chat(self._session_for(args, loop), gone.text, forgot=True)
+        return f"Forgot [{gone.id}]: {gone.text}"
 
     async def _tool_thread_context(self, args: dict[str, Any], loop: AgentLoop) -> str:
         thread = self.store.threads.get(str(args.get("thread_id") or "").strip())

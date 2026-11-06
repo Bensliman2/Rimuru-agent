@@ -202,3 +202,22 @@ class Job:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class Memory:
+    """Something Rimuru remembers across sessions and restarts (article s8.1):
+    a lasting fact about the person, one of their sessions, or anything else.
+    The person can see, change and delete every one (Under the hood -> Memory)."""
+
+    id: str
+    text: str
+    about: str = "you"            # you | session | general
+    session_key: str = ""         # the chat session it belongs to, when about == "session"
+    source: str = "rimuru"        # rimuru (it chose to) | you (the person added it)
+    created_ts: float = field(default_factory=now)
+    used_ts: float = 0.0
+    uses: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

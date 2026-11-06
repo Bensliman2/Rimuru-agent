@@ -521,7 +521,7 @@ class RimuruSystem:
                 "interventions": self.watchdog.interventions,
             },
             "sim": self.sim.status(),
-            "notes": self.store.notes[-10:],
+            "memories": len(self.store.memories),
         }
 
     def graph(self) -> dict[str, Any]:

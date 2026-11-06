@@ -282,6 +282,10 @@
                                         : mark("clone");
         parts.push(`<button class="event ${m.kind}" data-worker="${esc(m.worker_id || "")}"
           title="See what the clone did">${lead}<span>${label}</span></button>`);
+      } else if (m.role === "memory") {
+        // Rimuru keeping (or dropping) a lasting fact - visible as it happens.
+        parts.push(`<a class="event memory" href="/inside#memory" title="See and change everything Rimuru remembers">
+          <svg><use href="#i-book"/></svg><span>${m.forgot ? "Forgot" : "Remembered"}: ${esc(m.text)}</span></a>`);
       }
     }
     if (data.thinking) {

@@ -768,3 +768,8 @@ a.bar-btn { text-decoration: none; }
   .folder-bar { padding: 8px 10px 8px 12px; gap: 8px; }
   .fb-path { display: none; }
 }
+
+/* Rimuru keeping a lasting fact: a quiet line in the chat, linked to Memory */
+a.event { text-decoration: none; }
+.event.memory { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+.event.memory:hover { color: var(--accent-strong); border-color: var(--accent); }

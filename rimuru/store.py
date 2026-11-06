@@ -21,6 +21,7 @@ from .models import (
     R_PASSTHROUGH,
     V_ACCEPTED,
     Job,
+    Memory,
     Session,
     Step,
     Task,
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS chat (
     id TEXT PRIMARY KEY, ts REAL, role TEXT, text TEXT, data TEXT
 );
 CREATE TABLE IF NOT EXISTS contexts (session_id TEXT PRIMARY KEY, ts REAL, data TEXT);
+CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, ts REAL, data TEXT);
 CREATE INDEX IF NOT EXISTS steps_session ON steps(session_id, idx);
 CREATE INDEX IF NOT EXISTS triggers_thread ON triggers(thread_id);
 CREATE INDEX IF NOT EXISTS triggers_ts ON triggers(ts);
@@ -95,6 +97,8 @@ class Store:
         # Global memory. The Router is the system's memory (s2.1), and these are
         # the facts it has chosen to keep across tasks and sessions.
         self.notes: list[dict[str, Any]] = []
+        # Long-term memory (s8.1): what Rimuru remembers, read back to it each turn.
+        self.memories: dict[str, Memory] = {}
 
         # The person's conversation with Rimuru.
         self.chat: list[dict[str, Any]] = []
@@ -130,6 +134,14 @@ class Store:
             self.jobs[job.id] = job
         for ts, note in self._conn.execute("SELECT ts, note FROM notes ORDER BY ts"):
             self.notes.append({"ts": ts, "note": note})
+        for d in rows("SELECT data FROM memories ORDER BY ts"):
+            memory = from_dict(Memory, d)
+            self.memories[memory.id] = memory
+        if self.notes and not self.memories:
+            # Notes were write-only: kept, never read back. They become memories once.
+            for note in self.notes:
+                self.put_memory(Memory(id=new_id("memory"), text=note["note"], about="general",
+                                       created_ts=note["ts"]), quiet=True)
         self.chat.extend(rows("SELECT data FROM chat ORDER BY ts"))
 
     def add_chat(self, role: str, text: str, **extra: Any) -> dict[str, Any]:
@@ -351,6 +363,25 @@ class Store:
 
     def transcript(self, session_id: str) -> list[Step]:
         return self.steps.get(session_id, [])
+
+    # ------------------------------------------------------------------ #
+    # long-term memory
+    # ------------------------------------------------------------------ #
+    def put_memory(self, memory: Memory, *, quiet: bool = False) -> Memory:
+        self.memories[memory.id] = memory
+        self._write("INSERT OR REPLACE INTO memories (id, ts, data) VALUES (?,?,?)",
+                    (memory.id, memory.created_ts, json.dumps(memory.to_dict())))
+        if self.bus and not quiet:
+            self.bus.emit("memory.changed", memory=memory.to_dict())
+        return memory
+
+    def delete_memory(self, memory_id: str) -> Memory | None:
+        memory = self.memories.pop(memory_id, None)
+        if memory is not None:
+            self._write("DELETE FROM memories WHERE id = ?", (memory_id,))
+            if self.bus:
+                self.bus.emit("memory.changed", memory=memory.to_dict(), deleted=True)
+        return memory
 
     # ------------------------------------------------------------------ #
     # live conversations: what a loop holds in mind right now, saved after every

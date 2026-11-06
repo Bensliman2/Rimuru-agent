@@ -140,6 +140,7 @@ class WorkerAgent:
         root: Path | None = None,
         own_folder: bool = False,
         restore: dict[str, Any] | None = None,
+        memories: str = "",
     ) -> None:
         self.task = task
         # Its folder: the session's own, or the practice folder for other work.
@@ -218,6 +219,8 @@ class WorkerAgent:
                 "rather than starting over, and never delete or rename a file you did not "
                 "create unless they asked for exactly that.\n\n"
             )
+        if memories:
+            brief += memories.rstrip() + "\n\n"
         if resume_note:
             brief += resume_note.rstrip() + "\n\n"
         brief += "Begin."

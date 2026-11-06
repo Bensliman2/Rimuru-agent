@@ -106,6 +106,9 @@ class AgentLoop:
         self.persist = True
         self._restored_pending: list[dict[str, Any]] | None = None
         self._resume_input = ""
+        # Extra context for a new turn, from the events in it (the Router: what it
+        # remembers that may matter - rimuru/memory.py).
+        self.annotate: Callable[[list[Injection]], str] | None = None
 
     # ------------------------------------------------------------------ #
     # saved conversations: resuming exactly where a restart cut in
@@ -316,6 +319,15 @@ class AgentLoop:
                     if not batch:
                         continue
                     injected = self._render_batch(batch)
+                    if self.annotate is not None:
+                        try:
+                            extra_context = self.annotate(batch)
+                        except Exception as exc:  # noqa: BLE001 - context is optional
+                            extra_context = ""
+                            self.bus.emit("session.error", session_id=self.session.id, consecutive=0,
+                                          error=f"annotate: {type(exc).__name__}: {exc}")
+                        if extra_context:
+                            injected = f"{injected}\n\n{extra_context}"
                     self.messages.append(Msg(role="user", content=injected))
                     batch_size = len(batch)
                     self._turn_from_person = self._from_person(batch)

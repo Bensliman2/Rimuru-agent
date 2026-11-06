@@ -16,6 +16,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from .. import memory
 from ..context import inline_trigger
 from ..ids import new_id
 from ..llm import build_client
@@ -123,6 +124,8 @@ class WorkerPool:
             own_folder=bool(thread is not None and getattr(thread, "folder", "")
                             and Path(thread.folder) == root),
             restore=restore,
+            memories=memory.for_clone(self.store.memories.values(),
+                                      thread.key if is_session(thread, self.config) else ""),
         )
         self.workers[session.id] = worker
         self.store.update_task(task, worker_id=session.id, status="queued")

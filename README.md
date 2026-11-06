@@ -62,6 +62,10 @@ Then open **http://127.0.0.1:8800**.
   **Open** shows it in File Explorer. A whole drive, your whole home folder, the
   system's folders and Rimuru's own folder are refused, and clones are told never
   to delete files of yours they did not make.
+- **Rimuru remembers.** It keeps lasting facts by itself - about you, about each
+  session's work - and uses them in later sessions without being asked; its clones get
+  them too. A small line in the chat shows each one as it is kept, and Under the hood ->
+  Memory lists them all, to change or forget. Passwords and keys are never kept.
 - **Interrupt any time.** If Rimuru is busy with something else when you write - a
   clone's report, a group chat - your message cuts in and is answered first.
 - **If your AI provider runs out of credit** or rejects the key, Rimuru says so in
@@ -101,7 +105,7 @@ the same plain language as the chat - one view at a time:
 | Clones | every clone with its little slime, grouped by session; pick one to see its job, its commands and every turn |
 | Watchdog | its checks and interventions, its notes - and a box to ask it why something failed |
 | Messages | what happened to every incoming message, and the rules for group chats, editable in plain words |
-| Memory | find anything by typing a word or two - a session, a job, a message - and the notes Rimuru keeps |
+| Memory | find anything by typing a word or two - a session, a job, a message - and everything Rimuru remembers, to change or forget |
 | Practice runs | scripted workloads - a busy team chat, a burst, a quiet day, two coding exercises |
 
 Five modules, each a section of the article:

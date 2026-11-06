@@ -364,12 +364,75 @@
   });
 
   /* ================================================================ memory */
-  function renderMemory(o) {
+  function renderMemory() {
     if (!$("find-q").value.trim()) loadMemory();
-    setHTML($("notes"), (o.notes || []).length
-      ? o.notes.slice().reverse().map((n) => `<li>${linkIds(esc(n.note))}</li>`).join("")
-      : '<li class="muted">Nothing yet. Rimuru keeps short notes here that it will need across jobs.</li>');
+    loadRemembered();
   }
+
+  // What Rimuru remembers: every memory, grouped, each one changeable or forgettable.
+  let editingMemory = null;
+  async function loadRemembered() {
+    if (editingMemory) return;                      // do not redraw under the person's typing
+    let d;
+    try { d = await api("/api/memories"); } catch { return; }
+    const item = (m) => `<li class="mem-item">
+        <span class="mem-text">${esc(m.text)}</span>
+        <span class="mem-meta">${m.source === "you" ? "added by you" : "Rimuru chose to remember this"} &middot; ${since(m.created_ts)}</span>
+        <span class="mem-actions"><button class="ghost small" data-mem-edit="${esc(m.id)}">Change</button>
+          <button class="ghost small danger" data-mem-del="${esc(m.id)}">Forget</button></span></li>`;
+    const groups = d.groups.filter((g) => g.items.length);
+    setHTML($("mem-groups"), groups.map((g) => `<div class="mem-group">
+        <h3 class="mini">${esc(g.title)}${g.key ? ` <a class="small" href="/#chat=${encodeURIComponent(g.key)}">open the session</a>` : ""}</h3>
+        <ul class="mem-list">${g.items.map(item).join("")}</ul></div>`).join("")
+      || '<p class="muted">Nothing yet. As you work together, Rimuru keeps lasting facts here - and you can add your own.</p>');
+  }
+  const memNote = (text, cls = "") => { $("mem-note").textContent = text; $("mem-note").className = `mem-note ${cls}`; };
+  $("mem-add").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const text = $("mem-add-text").value.trim();
+    if (!text) return;
+    try {
+      await post("/api/memories", { text, about: $("mem-add-about").value });
+      $("mem-add-text").value = "";
+      memNote("Remembered.", "good");
+      loadRemembered();
+    } catch (e) { memNote(e.message, "bad"); }
+  });
+  $("mem-groups").addEventListener("click", async (ev) => {
+    const del = ev.target.closest("[data-mem-del]");
+    const edit = ev.target.closest("[data-mem-edit]");
+    const save = ev.target.closest("[data-mem-save]");
+    const cancel = ev.target.closest("[data-mem-cancel]");
+    if (del) {
+      if (!confirm("Forget this for good?")) return;
+      try { await api(`/api/memories/${encodeURIComponent(del.dataset.memDel)}`, { method: "DELETE" }); }
+      catch (e) { memNote(e.message, "bad"); }
+      editingMemory = null;
+      loadRemembered();
+    } else if (edit) {
+      const li = edit.closest(".mem-item");
+      const old = li.querySelector(".mem-text").textContent;
+      editingMemory = edit.dataset.memEdit;
+      li.innerHTML = `<input class="mem-edit" maxlength="500" value="${esc(old)}" aria-label="Change this memory">
+        <span class="mem-actions"><button class="ghost small" data-mem-save="${esc(editingMemory)}">Save</button>
+        <button class="ghost small" data-mem-cancel="1">Cancel</button></span>`;
+      li.querySelector("input").focus();
+    } else if (save) {
+      const text = save.closest(".mem-item").querySelector("input").value.trim();
+      try {
+        await api(`/api/memories/${encodeURIComponent(save.dataset.memSave)}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+        memNote("Changed.", "good");
+        editingMemory = null;
+        $("mem-groups")._html = null;
+        loadRemembered();
+      } catch (e) { memNote(e.message, "bad"); }
+    } else if (cancel) {
+      editingMemory = null;
+      $("mem-groups")._html = null;
+      loadRemembered();
+    }
+  });
   // Find anything by words. The person never needs an ID: they type what they
   // remember and pick from the list. IDs still work when clicked elsewhere.
   const KIND = {

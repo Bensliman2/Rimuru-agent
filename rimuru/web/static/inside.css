@@ -319,3 +319,34 @@ h3.mini {
 /* the Clones tab: one group per session, like Memory */
 #clone-list { gap: 10px; }
 .clone-group .mem-head { align-items: center; }
+
+/* Memory: what Rimuru remembers, each one changeable or forgettable */
+.mem-add { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 6px; }
+.mem-add input, .mem-edit {
+  flex: 1 1 260px; min-width: 0; font: inherit; font-size: 13.5px; color: var(--text);
+  padding: 7px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2);
+}
+.mem-add select {
+  font: inherit; font-size: 13px; color: var(--text); padding: 6px 8px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+}
+.mem-add input:focus, .mem-edit:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+.mem-note { min-height: 18px; font-size: 12.5px; color: var(--muted); margin: 0 0 6px; }
+.mem-note.good { color: var(--ok); }
+.mem-note.bad { color: var(--bad); }
+.mem-group { margin-top: 12px; }
+.mem-group h3 a { font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px; color: var(--accent); }
+.mem-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mem-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.mem-text { font-size: 13.5px; overflow-wrap: anywhere; }
+.mem-meta { grid-column: 1; font-size: 12px; color: var(--muted); }
+.mem-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; }
+.mem-item .mem-edit { grid-column: 1; grid-row: 1 / span 2; }
+.ghost.small.danger { color: var(--bad); }
+@media (max-width: 640px) {
+  .mem-item { grid-template-columns: 1fr; }
+  .mem-actions { grid-column: 1; grid-row: auto; }
+}

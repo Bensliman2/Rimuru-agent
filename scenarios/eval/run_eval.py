@@ -100,8 +100,21 @@ def log(msg: str) -> None:
 # --------------------------------------------------------------------------- #
 # seed / drive / settle
 # --------------------------------------------------------------------------- #
+EVAL_SESSION = "s-eval01"
+
+
+def session_folder() -> Path:
+    """The evaluation runs as one chat session; its clones work in its folder."""
+    from types import SimpleNamespace
+
+    from rimuru.sessions import folder_name, title_from
+
+    first = SCRIPT[0][2]
+    return Path(CONFIG.sessions_dir) / folder_name(SimpleNamespace(title=title_from(first), key=EVAL_SESSION))
+
+
 def seed() -> None:
-    ws = Path(CONFIG.workspace)
+    ws = session_folder()
     ws.mkdir(parents=True, exist_ok=True)
     for child in ws.iterdir():
         shutil.rmtree(child) if child.is_dir() else child.unlink()
@@ -154,7 +167,7 @@ def drive() -> dict:
     for offset, rid, text in SCRIPT:
         while time.time() < t0 + offset / speed:
             time.sleep(0.2)
-        res = post("/api/message", {"text": text})
+        res = post("/api/message", {"text": text, "thread_key": EVAL_SESSION})
         sent.append({"id": rid, "text": text, "ts": time.time(), "trigger_id": res.get("trigger_id")})
         log(f"sent {rid}: {text[:70]}")
     log("script finished - waiting for the work to settle")
@@ -251,7 +264,7 @@ def score() -> dict:
     data["sessions"] = {k: v for k, v in data["sessions"].items() if k in keep}
     data["steps"] = {k: [st for st in v if st["ts"] <= cutoff]
                      for k, v in data["steps"].items() if k in keep}
-    ws = Path(CONFIG.workspace)
+    ws = session_folder()
     sent = {s["id"]: s for s in meta["sent"]}
     checks: dict[str, dict] = {}
 
@@ -610,7 +623,8 @@ def probe_stop() -> dict:
     log("probe: asking for a long job, then pressing Stop while it runs")
     before = {c["id"] for c in get("/api/work")["cards"]}
     post("/api/message", {"text": "Please write a long, detailed tutorial for shopkit "
-                                  "in docs/tutorial.md, with examples for every function."})
+                                  "in docs/tutorial.md, with examples for every function.",
+                          "thread_key": EVAL_SESSION})
     t0 = time.time()
     clone = None
     while time.time() - t0 < 180:
@@ -642,7 +656,7 @@ def probe_stop() -> dict:
            "stop response": res, "clone stopped after s": stopped_after,
            "containers left": containers, "work restarted on its own": restarted,
            "Rimuru acknowledged": ack[0]["text"] if ack else None,
-           "tutorial file left": (Path(CONFIG.workspace) / "docs" / "tutorial.md").exists()}
+           "tutorial file left": (session_folder() / "docs" / "tutorial.md").exists()}
     (OUT / "probe_stop.json").write_text(json.dumps(out, indent=2))
     log(json.dumps(out, indent=2))
     return out

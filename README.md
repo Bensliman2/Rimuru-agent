@@ -28,6 +28,11 @@ Then open **http://127.0.0.1:8800**.
   your computer and never shown again. Until models are set up, Rimuru runs in
   **demo mode**: it shows how everything moves, and says plainly that nothing real
   was built.
+- **Free models.** No account at all: **Kilo Code** serves free models with no key
+  (about 200 requests an hour). Free keys from Groq, Google Gemini, Mistral,
+  OpenRouter, NVIDIA, Z AI and Cohere are one paste away in **Models** (from the list
+  at [awesome-free-llm-apis](https://github.com/mnfst/awesome-free-llm-apis)). Free
+  tiers may log what you send - nothing confidential.
 - **Running code.** Start **Docker Desktop** before Rimuru and clones can run what
   they write - tests, scripts - inside a sandbox (below). The sandbox image builds by
   itself the first time (about a minute). Without Docker, clones can still read and
@@ -48,8 +53,15 @@ Then open **http://127.0.0.1:8800**.
 - **Stop** stops everything in progress. A single job can be stopped from its details.
 - **One session per piece of work.** Click **New session** for each new thing you
   want done. Every session keeps its own conversation, its own clones and its own
-  folder of files (`data/sessions/<name>`), so nothing gets mixed up - and Rimuru
-  still remembers what you told it in other sessions.
+  folder of files, so nothing gets mixed up - and Rimuru still remembers what you
+  told it in other sessions.
+- **You choose where each session works.** The bar above the chat shows the
+  session's folder. **Change** picks a folder on your computer - a project you
+  already have, or a new folder you make right there - or leaves it to Rimuru,
+  which makes one named after the session's first job (`data/sessions/<name>`).
+  **Open** shows it in File Explorer. A whole drive, your whole home folder, the
+  system's folders and Rimuru's own folder are refused, and clones are told never
+  to delete files of yours they did not make.
 - **Interrupt any time.** If Rimuru is busy with something else when you write - a
   clone's report, a group chat - your message cuts in and is answered first.
 - **If your AI provider runs out of credit** or rejects the key, Rimuru says so in
@@ -66,7 +78,7 @@ When Docker is running, every command a clone runs gets a throwaway container:
 | | |
 |---|---|
 | network | **none** - nothing can be downloaded, and nothing can leave |
-| files | only the workspace (`data/workspace`) is visible; the rest of your disk is not |
+| files | only the session's own folder is visible; the rest of your disk is not |
 | system | read-only; every Linux capability dropped; no privilege escalation |
 | limits | 1 GB memory, 2 CPUs, 256 processes |
 | runaways | killed at the timeout or on Stop - the container itself, not just the client |
@@ -84,7 +96,7 @@ the same plain language as the chat - one view at a time:
 |---|---|
 | Overview | Rimuru, the clones and the watchdog at a glance; what came in; the latest events; models and cost |
 | Rimuru | what it is doing, what it decided and said, and its thoughts turn by turn |
-| Clones | every clone with its little slime; pick one to see its job, its commands and every turn |
+| Clones | every clone with its little slime, grouped by session; pick one to see its job, its commands and every turn |
 | Watchdog | its checks and interventions, its notes - and a box to ask it why something failed |
 | Messages | what happened to every incoming message, and the rules for group chats, editable in plain words |
 | Memory | find anything by typing a word or two - a session, a job, a message - and the notes Rimuru keeps |
@@ -116,9 +128,9 @@ says.
 | Same, typed into the chat app, clones running code in the sandbox | **PASS** - hidden tests 37/37; its own 134 tests pass; it ran its CLI to check itself; Rimuru relayed a mid-task follow-up to the right clone |
 | **Under pressure**: a messy morning - parallel clones on one file, a change of mind, cancel, secrets, prompt injection, a crash | First run: 11 pass, 1 fail, and the crash probe failed. **After the fixes: 13 pass, 0 fail, 3 warnings; the crash and Stop probes pass** - see [docs/evaluation.md](docs/evaluation.md) |
 
-**Speed.** Clones now build the smallest version that works first and offer extras
-afterwards (`RIMURU_BUILD_STYLE=quick`, the default; `thorough` builds everything at
-once). How fast they are depends mostly on the clones' model. "Build a calculator with
+**Speed.** Clones build the smallest version that works first and offer extras
+afterwards - the only way they build. How fast they are depends mostly on the clones'
+model. "Build a calculator with
 a web UI" took **14.6 minutes** the old way on `kimi-k3.1-pro`, 5.9 with the quick
 style on the same model, and **1.9 minutes** with the quick style on
 `kimi-k2.7-code-highspeed` - and every version worked. Details and the model
@@ -154,7 +166,7 @@ Things only a real model surfaced, all fixed:
 ## For developers
 
 ```bash
-python -m pytest                          # 56 checks, including sandbox safety
+python -m pytest                          # 59 checks, including sandbox safety
 python run.py --demo                      # no AI model at all - an offline stand-in
 python run.py bench --scenario team       # the article's 300-event workload, headless
 python run.py bench --scenario smoke --speed 1   # real-model bug fixing on your models, graded
@@ -204,9 +216,13 @@ rimuru/
   recall.py      Chain of Recall
   store.py       durable state, including chat history
 config/          models.toml - your models (made by the Models button), and an example
+data/            your own data, never committed:
+  rimuru.db        everything Rimuru remembers - chats, jobs, every step
+  sessions/        Rimuru's folder for each session that did not pick its own
+  practice/        where practice runs play
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           56 automated checks
+tests/           59 automated checks
 run.py           serve | bench | verify | trace | eval
 ```

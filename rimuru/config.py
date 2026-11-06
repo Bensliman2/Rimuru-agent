@@ -70,17 +70,15 @@ class Config:
     # When the provider refuses the account (out of credit, key refused), try
     # again after this many seconds, doubling up to two minutes.
     blocked_retry_seconds: float = 30.0
-    # How clones build: "quick" delivers the smallest working version first and
-    # offers extras afterwards; "thorough" builds everything it thinks of in one go.
-    build_style: str = field(default_factory=lambda: (
-        os.environ.get("RIMURU_BUILD_STYLE") or "quick").strip().lower())
 
     # --- tools ---
     enable_bash: bool = field(default_factory=lambda: _bool("RIMURU_ENABLE_BASH", False))
     # auto | docker | simulated | host. auto = the Docker sandbox when it is available.
     shell: str = field(default_factory=lambda: (os.environ.get("RIMURU_SHELL") or "auto").lower())
+    # Where work that does not come from a chat session happens: practice runs
+    # and team channels. Chat sessions each get their own folder (sessions_dir).
     workspace: Path = field(
-        default_factory=lambda: Path(os.environ.get("RIMURU_WORKSPACE", "./data/workspace")).resolve()
+        default_factory=lambda: Path(os.environ.get("RIMURU_WORKSPACE", "./data/practice")).resolve()
     )
     # Each chat session's own folder lives here (rimuru/sessions.py) - outside the
     # shared workspace, so resetting the workspace never wipes a session's work.

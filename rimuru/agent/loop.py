@@ -21,7 +21,7 @@ import contextlib
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from ..config import Config
 from ..context import trim_messages
@@ -94,6 +94,13 @@ class AgentLoop:
         self.cut_ins = 0
         self._call: asyncio.Future | None = None
         self._turn_from_person = False
+        # The turn in progress: every event it answers (including ones folded in
+        # on the way) and when it began. on_turn_end runs when the model stops
+        # calling tools, with its final text - the Router uses it to catch an
+        # answer that was written but never sent.
+        self.turn_events: list[Injection] = []
+        self.turn_opened_ts = 0.0
+        self.on_turn_end: Callable[[str], Awaitable[None]] | None = None
 
     # ------------------------------------------------------------------ #
     # lifecycle
@@ -245,6 +252,7 @@ class AgentLoop:
                     # below). Try the same turn again, with anything new folded in.
                     self._retry_turn = False
                     extra = await self._drain(block=False)
+                    self.turn_events.extend(extra)
                     if extra:
                         text = "This arrived meanwhile:\n" + self._render_batch(extra)
                         last = self.messages[-1]
@@ -263,9 +271,12 @@ class AgentLoop:
                     self.messages.append(Msg(role="user", content=injected))
                     batch_size = len(batch)
                     self._turn_from_person = self._from_person(batch)
+                    self.turn_events = list(batch)
+                    self.turn_opened_ts = now()
                 else:
                     # Tool results, plus anything that arrived while tools ran.
                     extra = await self._drain(block=False)
+                    self.turn_events.extend(extra)
                     content: list[dict[str, Any]] = list(pending_results)
                     if extra:
                         content.append({"type": "text", "text": self._render_batch(extra)})
@@ -425,6 +436,17 @@ class AgentLoop:
 
                 self.store.add_step(step)
                 step_index += 1
+
+                # The turn is over unless the model ran out of room mid-thought
+                # (it is asked to act again above, so its text is not final).
+                if (not response.tool_calls and self.on_turn_end is not None
+                        and response.stop_reason not in {"length", "max_tokens"}):
+                    try:
+                        await self.on_turn_end(response.text or "")
+                    except Exception as exc:  # noqa: BLE001 - a hook must not end the session
+                        self.bus.emit("session.error", session_id=self.session.id,
+                                      error=f"after the turn: {type(exc).__name__}: {exc}",
+                                      consecutive=0)
 
             except asyncio.CancelledError:
                 raise

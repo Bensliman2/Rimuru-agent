@@ -31,7 +31,7 @@ from .llm import build_client, catalog
 from .llm.base import Msg
 from .models import TERMINAL, Trigger
 from .recall import describe_graph
-from .sessions import DEFAULT as DEFAULT_SESSION, title_from
+from .sessions import title_from, title_of
 from .router.filtering import EventFilter
 from .router.routing import EventRouter
 from .router.session import RouterAgent
@@ -125,6 +125,13 @@ class RimuruSystem:
         self._told: set[tuple[str, str]] = set()
         self.bus.on("provider.blocked", self._on_provider_blocked)
         self.bus.on("provider.recovered", self._on_provider_recovered)
+
+        # The first conversation predates sessions and was called "direct line";
+        # name it like every other session, so its folder has a readable name.
+        first = self.store.threads.get(self.store.thread_by_key.get("console:direct", ""))
+        if first is not None and first.title == "direct line":
+            first.title = title_of(self.store, first)
+            self.store._persist_thread(first)
 
         # Whatever was mid-flight when the process last died.
         self.recovered = self._mark_interrupted()
@@ -381,8 +388,8 @@ class RimuruSystem:
             author=author,
             kind="human_direct",
             content=text,
-            # A new session is named after the first thing the person asked.
-            meta={"thread_title": "direct line" if thread_key == DEFAULT_SESSION else title_from(text)},
+            # A session is named after the first thing the person asked.
+            meta={"thread_title": title_from(text)},
         )
         if channel in self.config.conversation_channels:
             self.store.add_chat("user", text, trigger_id=trigger.id, chat=thread_key)

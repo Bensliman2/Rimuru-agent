@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable
 from ..context import inline_trigger
 from ..ids import ROUTER_SESSION_ID
 from ..models import R_PASSTHROUGH, R_ROUTER, V_ACCEPTED, V_CANDIDATE, V_DROPPED_FAST, Trigger
+from ..sessions import UNNAMED
 
 InjectRouter = Callable[[str, str | None], None]
 InjectWorker = Callable[[str, str, str | None], bool]
@@ -57,6 +58,9 @@ class EventRouter:
             trigger.channel, trigger.thread_key,
             trigger.meta.get("thread_title") or trigger.thread_key,
         )
+        if thread.title == UNNAMED and trigger.meta.get("thread_title"):
+            # A session whose folder was picked before anything was said.
+            thread.title = trigger.meta["thread_title"]
         self.store.attach_trigger_to_thread(thread, trigger)
         self.store.put_trigger(trigger)
         self.bus.emit("trigger.received", trigger=trigger.to_dict())

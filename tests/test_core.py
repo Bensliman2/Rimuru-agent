@@ -25,6 +25,7 @@ def make_system(tmp_path: Path, **overrides) -> RimuruSystem:
     config.provider = "mock"
     config.db_path = tmp_path / "test.db"
     config.workspace = tmp_path / "ws"
+    config.sessions_dir = tmp_path / "sessions"
     for key, value in overrides.items():
         setattr(config, key, value)
     return RimuruSystem(config, speed=50.0)

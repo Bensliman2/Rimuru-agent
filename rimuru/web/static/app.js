@@ -68,13 +68,123 @@
       </button>`));
     $("session-list").innerHTML = rows.join("") ||
       '<p class="session-empty">Your sessions will appear here.</p>';
-    const current = list.find((s) => s.key === state.chat);
-    const note = $("files-note");
-    note.hidden = !(current && current.folder);
-    if (current && current.folder) {
-      note.innerHTML = `${icon("folder")}<span>This session's files are in <code>${esc(current.folder)}</code></span>`;
+  }
+
+  /* ------------------------------------------------------------- where a session works */
+  // Each session works in one folder: Rimuru's own folder for it (the default),
+  // or a folder the person picks on their computer. Shown above the chat.
+  const F = { info: null, kind: "made", data: null };
+
+  function renderFolder(info) {
+    const i = F.info = info || { kind: "new", working: false };
+    const path = $("fb-path");
+    if (i.kind === "new") {
+      $("fb-label").textContent = "New folder for this session";
+      path.textContent = ""; path.hidden = true;
+      $("folder-bar").title = "Its files go in a new folder, made when the first job starts. Change to pick your own.";
+    } else {
+      $("fb-label").textContent = i.kind === "picked" ? `Your folder: ${i.name}` : `Folder: ${i.name}`;
+      path.textContent = i.path; path.hidden = false;
+      $("folder-bar").title = `This session's files are in ${i.path}`;
+    }
+    $("fb-open").hidden = !(i.kind !== "new" && i.exists);
+    const change = $("fb-change");
+    change.disabled = !!i.working;
+    change.title = i.working ? "Wait until this session's clones finish, or stop them"
+                             : "Choose where this session works";
+  }
+
+  const fnote = (text, cls) => { const n = $("folders-note"); n.textContent = text || ""; n.className = `set-note ${cls || ""}`; };
+
+  async function openFolders() {
+    if (F.info && F.info.working) return;
+    $("scrim").hidden = false; $("folders").hidden = false;
+    fnote("", "");
+    const picked = F.info && F.info.kind === "picked";
+    F.data = null;
+    setKind(picked ? "picked" : "made", picked ? F.info.path : null);
+  }
+  function closeFolders() {
+    $("folders").hidden = true;
+    if ($("panel").hidden && $("settings").hidden) $("scrim").hidden = true;
+  }
+  function setKind(kind, startAt = null) {
+    F.kind = kind;
+    document.querySelectorAll('input[name="fp-kind"]').forEach((r) => { r.checked = r.value === kind; });
+    $("fp-browser").hidden = kind !== "picked";
+    if (kind === "picked" && !F.data) browse(startAt);
+    updateUse();
+  }
+  function updateUse() {
+    const use = $("folders-use");
+    if (F.kind === "made") { use.disabled = false; use.textContent = "Use Rimuru's folder"; return; }
+    const d = F.data;
+    use.disabled = !(d && d.usable);
+    use.textContent = d ? `Use “${d.name}”` : "Use this folder";
+  }
+  async function browse(path) {
+    let d;
+    try { d = await post("/api/folders", { path }); }
+    catch (e) { fnote(e.message, "bad"); return; }
+    F.data = d;
+    $("fp-name").textContent = d.name;
+    $("fp-path").textContent = d.path;
+    $("fp-up").disabled = !d.parent;
+    $("fp-places").innerHTML = d.places.map((p) =>
+      `<button type="button" class="fp-place${p.path === d.path ? " on" : ""}" data-path="${esc(p.path)}">${esc(p.label)}</button>`).join("");
+    $("fp-list").innerHTML = d.dirs.map((x) =>
+      `<button type="button" class="fp-row" data-path="${esc(x.path)}">${icon("folder")}<span>${esc(x.name)}</span>
+        <svg class="chev"><use href="#i-chevron"/></svg></button>`).join("") ||
+      '<p class="fp-empty">No folders inside. Use this one, or make a new folder here.</p>';
+    $("fp-list").scrollTop = 0;
+    fnote(d.usable ? "" : d.why_not, d.usable ? "" : "warn");
+    updateUse();
+  }
+  async function makeFolder() {
+    const name = $("fp-new-name").value.trim();
+    if (!name || !F.data) { $("fp-new-name").focus(); return; }
+    try {
+      const r = await post("/api/folders/new", { parent: F.data.path, name });
+      $("fp-new-name").value = "";
+      await browse(r.path);
+      fnote(`Made “${name}”.`, "ok");
+    } catch (e) { fnote(e.message, "bad"); }
+  }
+  async function useFolder() {
+    const path = F.kind === "picked" ? (F.data && F.data.path) : "";
+    if (F.kind === "picked" && !path) return;
+    $("folders-use").disabled = true;
+    try {
+      const r = await post("/api/session/folder", { chat: state.chat || "direct", path });
+      renderFolder(r.folder);
+      closeFolders();
+      refresh();
+    } catch (e) { fnote(e.message, "bad"); updateUse(); }
+  }
+  async function openFolder() {
+    const b = $("fb-open");
+    try { await post("/api/session/open-folder", { chat: state.chat || "direct" }); }
+    catch (e) {
+      // Cannot open it from here (no desktop, say): the path is the next best thing.
+      try { await navigator.clipboard.writeText(F.info.path); b.textContent = "Path copied"; }
+      catch { b.textContent = "Could not open"; }
+      b.title = e.message;
+      setTimeout(() => { b.textContent = "Open"; b.title = ""; }, 2200);
     }
   }
+  $("fb-change").addEventListener("click", openFolders);
+  $("fb-open").addEventListener("click", openFolder);
+  $("folders-close").addEventListener("click", closeFolders);
+  $("folders-use").addEventListener("click", useFolder);
+  $("fp-new").addEventListener("click", makeFolder);
+  $("fp-new-name").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); makeFolder(); } });
+  $("fp-up").addEventListener("click", () => { if (F.data && F.data.parent) browse(F.data.parent); });
+  document.querySelectorAll('input[name="fp-kind"]').forEach((r) =>
+    r.addEventListener("change", () => setKind(r.value)));
+  $("folders").addEventListener("click", (ev) => {
+    const b = ev.target.closest(".fp-place, .fp-row");
+    if (b) browse(b.dataset.path);
+  });
 
   function switchSession(key) {
     if (key === state.chat) { closeSessions(); return; }
@@ -83,6 +193,7 @@
     state.chatSig = "";
     closePanel();
     closeSessions();
+    renderFolder(null);
     messagesEl.querySelectorAll(".msg, .event, .typing").forEach((n) => n.remove());
     $("welcome").hidden = false;
     renderSessions(state.sessions);
@@ -205,6 +316,8 @@
     } else {
       input.style.height = "";
     }
+    // A scrollbar only for long messages - not for a placeholder that wraps on a phone.
+    input.style.overflowY = input.value && input.scrollHeight > 180 ? "auto" : "hidden";
     sendBtn.disabled = !input.value.trim() || state.busy;
   }
   input.addEventListener("input", autosize);
@@ -331,10 +444,12 @@
   }
   $("panel-close").addEventListener("click", closePanel);
   $("scrim").addEventListener("click", () => {
-    if (!$("settings").hidden) closeSettings(); else closePanel();
+    if (!$("folders").hidden) closeFolders();
+    else if (!$("settings").hidden) closeSettings(); else closePanel();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (!$("folders").hidden) { closeFolders(); return; }
     if ($("settings").hidden) { closePanel(); return; }
     // Escape inside a field only dismisses its suggestions; it must not throw
     // away a model being added.
@@ -400,7 +515,9 @@
           ? `<div class="now-last">Last step: ${esc(latest.lines[latest.lines.length - 1])}</div>` : ""}</div></div>`);
     }
     if (c.result) parts.push(`<div class="section"><h3>What it reported</h3><div class="box">${fmt(c.result)}</div></div>`);
-    if (c.files.length) parts.push(`<div class="section"><h3>Files it changed</h3><div class="files">
+    if (c.files.length) parts.push(`<div class="section"><h3>Files it changed</h3>
+      <div class="folder-line">${icon("folder")}<span>In <code>${esc(d.folder)}/</code></span>
+        <button class="copy" data-copy="${esc(d.folder_abs)}">Copy folder path</button></div><div class="files">
       ${c.files.map((f) => `<div>${icon(c.edited.includes(f) ? "pencil" : "file")}<span>${esc(f)}</span>${
         c.edited.includes(f) ? '<span class="tag-soft">edited</span>' : ""}</div>`).join("")}</div></div>`);
     if (d.asked) parts.push(`<div class="section"><h3>What it was asked to do</h3><div class="box">${esc(d.asked)}</div></div>`);
@@ -682,6 +799,15 @@
     }
   }
 
+  // Copy a folder's full path, to paste into File Explorer or Finder.
+  document.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("[data-copy]");
+    if (!b) return;
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied"; }
+    catch { b.textContent = b.dataset.copy; }
+    setTimeout(() => { b.textContent = b.closest(".folder-line") ? "Copy folder path" : "Copy path"; }, 1800);
+  });
+
   $("models-btn").addEventListener("click", openSettings);
   $("demo-setup").addEventListener("click", openSettings);
   $("settings-close").addEventListener("click", closeSettings);
@@ -736,7 +862,7 @@
       const list = await api("/api/chats");
       renderSessions(list.items);
       const w = await api(`/api/work?chat=${encodeURIComponent(state.chat || "direct")}`);
-      renderStatus(w); renderClones(w);
+      renderStatus(w); renderClones(w); renderFolder(w.folder);
     } catch {
       $("status").className = "status offline";
       $("status-text").textContent = "Reconnecting";

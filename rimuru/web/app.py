@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from ..config import CONFIG, ROOT
 from ..llm import catalog
 from ..recall import recall as do_recall
+from .. import folders
 from .. import sessions as chats
 from ..system import RimuruSystem
 from . import friendly
@@ -123,6 +125,34 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         thread = system.store.threads.get(task.thread_id or "")
         return thread is not None and thread.channel == "console" and thread.key == key
 
+    def session_key(raw: Any) -> str:
+        key = str(raw or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", key):
+            raise HTTPException(400, "Which session? Its key is missing or malformed.")
+        return key
+
+    def busy_in(thread) -> bool:
+        return thread is not None and any(t.thread_id == thread.id and t.status in {"running", "queued"}
+                                          for t in system.store.tasks.values())
+
+    def folder_info(key: str) -> dict[str, Any]:
+        """Where a session works, for the folder bar above the chat."""
+        thread = session_thread(key)
+        kind = chats.folder_kind(thread) if thread is not None else "new"
+        path = chats.folder_for(system.config, thread) if thread is not None else None
+        if kind == "new" and path is not None and path.exists():
+            kind = "made"                # a session from before folders were stored
+        if kind == "new" or path is None:
+            return {"kind": "new", "name": "", "path": "", "shown": "", "exists": False,
+                    "working": busy_in(thread)}
+        return {"kind": kind, "name": path.name, "path": str(path), "shown": chats.display(path),
+                "exists": path.is_dir(), "working": busy_in(thread)}
+
+    def task_folder(task) -> Path:
+        if task is not None and task.folder:
+            return Path(task.folder)
+        return chats.folder_for(system.config, system.store.threads.get((task.thread_id if task else None) or ""))
+
     @app.get("/api/chats")
     async def list_chats() -> dict[str, Any]:
         """The person's sessions, most recent first."""
@@ -136,10 +166,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             if not said and not jobs:
                 continue
             folder = chats.folder_for(system.config, thread)
-            try:
-                shown = str(folder.relative_to(ROOT)).replace("\\", "/")
-            except ValueError:
-                shown = str(folder)
+            shown = chats.display(folder)
             items.append({
                 "key": thread.key, "title": chats.title_of(store, thread),
                 "created_ts": thread.created_ts,
@@ -147,6 +174,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
                 "working": sum(1 for t in jobs if t.status in {"running", "queued"}),
                 "jobs": len(jobs),
                 "folder": shown if folder.exists() and any(folder.iterdir()) else None,
+                "folder_abs": str(folder),
             })
         items.sort(key=lambda c: c["last_ts"], reverse=True)
         return {"items": items}
@@ -180,18 +208,25 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
 
     @app.get("/api/work")
     async def work(chat: str | None = None) -> dict[str, Any]:
-        """Every clone - or, with ?chat=, only that session's."""
+        """Every clone, each with the session it works for - or, with ?chat=, only
+        that session's, plus where that session works."""
         conv = system.config.conversation_channels
         store = system.store
-        cards = [
-            friendly.worker_card(store, s, conv)
-            for s in store.sessions_of_kind("worker")
-            if chat is None or in_session(store.tasks.get(s.task_id or "") or _NO_TASK, chat)
-        ]
+        cards = []
+        for s in store.sessions_of_kind("worker"):
+            task = store.tasks.get(s.task_id or "")
+            if chat is not None and not in_session(task or _NO_TASK, chat):
+                continue
+            card = friendly.worker_card(store, s, conv)
+            thread = store.threads.get((task.thread_id if task else None) or "")
+            card["session"] = ({"key": thread.key, "title": chats.title_of(store, thread)}
+                               if chats.is_session(thread, system.config) else None)
+            cards.append(card)
         cards.sort(key=lambda c: c["started_ts"] or 0, reverse=True)
         overview = system.overview()
         return {
             "cards": cards,
+            "folder": folder_info(chat) if chat is not None else None,
             "demo": overview["demo"],
             "demo_forced": system.config.demo_forced(),
             "blocked": overview["blocked"],
@@ -207,13 +242,70 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         if session is None or session.kind != "worker":
             raise HTTPException(404, f"no clone {worker_id}")
         task = system.store.tasks.get(session.task_id or "")
+        folder = task_folder(task)
         return {
+            "folder": chats.display(folder), "folder_abs": str(folder),
             "card": friendly.worker_card(system.store, session, system.config.conversation_channels),
             "asked": friendly.plain(task.brief) if task else "",
             "timeline": friendly.worker_timeline(system.store, session),
             "stages": friendly.worker_stages(system.store, session),
             "model": session.model,
         }
+
+    # ------------------------------------------------------------------ #
+    # where a session works (rimuru/sessions.py, rimuru/folders.py)
+    # ------------------------------------------------------------------ #
+    @app.post("/api/session/folder")
+    async def set_session_folder(payload: dict[str, Any]) -> dict[str, Any]:
+        """Choose where a session works: a folder of the person's (path), or - with
+        no path - a new folder Rimuru makes for it."""
+        key = session_key(payload.get("chat"))
+        store = system.store
+        thread = session_thread(key) or store.get_or_create_thread("console", key, chats.UNNAMED)
+        if busy_in(thread):
+            raise HTTPException(409, "This session's clones are still working. Change its "
+                                     "folder when they finish, or stop them first.")
+        raw = str(payload.get("path") or "").strip()
+        if raw:
+            try:
+                thread.folder = str(folders.check(raw, system.config))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+        else:
+            thread.folder = ""
+        store.put_thread(thread)
+        return {"ok": True, "folder": folder_info(key)}
+
+    @app.post("/api/folders")
+    async def list_folders(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The folders inside one folder, to pick from. POST, so that only this
+        app's own page can ask (the Origin check in local_only)."""
+        return await asyncio.to_thread(folders.listing, (payload or {}).get("path"), system.config)
+
+    @app.post("/api/folders/new")
+    async def new_folder(payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            path = folders.make(payload.get("parent", ""), payload.get("name", ""), system.config)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return {"ok": True, "path": str(path)}
+
+    @app.post("/api/session/open-folder")
+    async def open_session_folder(payload: dict[str, Any]) -> dict[str, Any]:
+        """Open the session's folder in File Explorer. Only that folder: the path
+        is the session's, never one taken from the request."""
+        info = folder_info(session_key(payload.get("chat")))
+        if info["kind"] == "new":
+            raise HTTPException(404, "This session has no folder yet. Rimuru makes one when "
+                                     "its first job starts.")
+        if not info["exists"]:
+            raise HTTPException(404, "That folder is not there any more.")
+        try:
+            await asyncio.to_thread(folders.open_in_file_manager, Path(info["path"]))
+        except Exception as exc:  # noqa: BLE001 - say so; the path can still be copied
+            raise HTTPException(500, f"Could not open it here ({type(exc).__name__}). "
+                                     "Copy the path instead.") from None
+        return {"ok": True}
 
     @app.post("/api/stop")
     async def stop_everything(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -385,6 +477,38 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             "text": do_recall(obj_id, system.store, full=full,
                               cap=system.config.inline_content_cap),
         }
+
+    @app.get("/api/memory")
+    async def memory() -> dict[str, Any]:
+        """Everything done, session by session: each session's clones and the job
+        each one did - so a person can follow the story without any IDs."""
+        store = system.store
+        conv = system.config.conversation_channels
+        groups: dict[str, dict[str, Any]] = {}
+        for thread in store.threads.values():
+            if not chats.is_session(thread, system.config):
+                continue
+            said = [m for m in store.chat if m.get("chat", chats.DEFAULT) == thread.key]
+            folder = chats.folder_for(system.config, thread)
+            groups[thread.id] = {
+                "key": thread.key, "title": chats.title_of(store, thread), "messages": len(said),
+                "last_ts": max([thread.last_ts] + [m["ts"] for m in said]), "clones": [],
+                "folder": chats.display(folder) if folder.exists() else None, "folder_abs": str(folder),
+            }
+        other = {"key": None, "title": "Practice runs and team channels", "messages": 0, "last_ts": 0.0,
+                 "clones": [], "folder": chats.display(system.config.workspace),
+                 "folder_abs": str(system.config.workspace)}
+        for worker in store.sessions_of_kind("worker"):
+            card = friendly.worker_card(store, worker, conv)
+            task = store.tasks.get(worker.task_id or "")
+            group = groups.get((task.thread_id if task else None) or "") or other
+            group["clones"].append(card)
+            group["last_ts"] = max(group["last_ts"], card["started_ts"] or 0)
+        sessions = sorted((g for g in groups.values() if g["messages"] or g["clones"]),
+                          key=lambda g: g["last_ts"], reverse=True)
+        for group in [*sessions, other]:
+            group["clones"].sort(key=lambda c: c["started_ts"] or 0)     # in the order they happened
+        return {"sessions": sessions, "other": other}
 
     @app.get("/api/search")
     async def search(q: str = "", limit: int = 40) -> dict[str, Any]:

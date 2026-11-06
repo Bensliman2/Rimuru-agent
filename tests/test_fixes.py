@@ -19,6 +19,7 @@ def make_system(tmp_path: Path) -> RimuruSystem:
     config.provider = "mock"
     config.db_path = tmp_path / "t.db"
     config.workspace = tmp_path / "ws"
+    config.sessions_dir = tmp_path / "sessions"
     return RimuruSystem(config, speed=50.0)
 
 
@@ -322,15 +323,75 @@ def test_a_turn_the_person_started_is_never_cut_short(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Speed: a first version first (quick build style, the default)
+# Speed: a first version first - the only way clones build
 # --------------------------------------------------------------------------- #
-def test_quick_style_asks_for_a_first_version_and_thorough_does_not(tmp_path):
-    quick = make_system(tmp_path / "q")
-    assert "A FIRST VERSION FIRST" in clone(quick, 1).loop.system_prompt
-    assert "SPEED" in quick.router.loop.system_prompt
-    quick.store.close()
+def test_clones_always_build_a_first_version_first(tmp_path):
+    system = make_system(tmp_path)
+    assert "A FIRST VERSION FIRST" in clone(system, 1).loop.system_prompt
+    assert "SPEED" in system.router.loop.system_prompt
+    system.store.close()
 
-    thorough = make_system(tmp_path / "t")
-    thorough.config.build_style = "thorough"
-    assert "A FIRST VERSION FIRST" not in clone(thorough, 2).loop.system_prompt
-    thorough.store.close()
+
+def test_an_answer_written_but_not_sent_still_reaches_the_person(tmp_path):
+    """Found with a free model: it answered in plain text instead of calling
+    reply, so the person saw nothing - not the answer to their question, not
+    "your calculator is ready". The app sends that text itself, to the one
+    session waiting on it - and never routine notes, never twice."""
+    from rimuru.llm.base import LLMResponse, ToolCall
+
+    async def until(cond, timeout=5.0):
+        end = time.time() + timeout
+        while time.time() < end and not cond():
+            await asyncio.sleep(0.02)
+        return cond()
+
+    async def run():
+        system = make_system(tmp_path)
+        store = system.store
+
+        class TextOnly(MockClient):
+            async def complete(self, *, messages, **kwargs):
+                last = messages[-1].as_text()
+                if "Sent on" in last:
+                    return LLMResponse(text="Replied to them.")
+                if "reports status=" in last:
+                    return LLMResponse(text="No action needed - routine progress.")
+                if "finished as done" in last:
+                    return LLMResponse(text="Your calculator is ready!")
+                if '"thanks!"' in last:
+                    return LLMResponse(tool_calls=[ToolCall(id="r1", name="reply", args={
+                        "thread_id": "console", "text": "You're welcome!"})])
+                if "15% tip" in last:
+                    return LLMResponse(text="15% of $64 is **$9.60**.")
+                return LLMResponse(text="ok")
+
+        _router_with(system, TextOnly())
+        await system.start()
+
+        def said():
+            return [m["text"] for m in store.chat if m.get("chat") == "s-0001" and m["role"] == "rimuru"]
+
+        await system.human_message("quick question, a 15% tip on 64 dollars?", thread_key="s-0001")
+        assert await until(lambda: said() == ["15% of $64 is **$9.60**."]), said()
+
+        thread = next(t for t in store.threads.values() if t.key == "s-0001")
+        worker = clone(system, 1)
+        worker.task.thread_id = thread.id
+        steps = lambda: len(store.transcript(system.router.session.id))  # noqa: E731
+        before = steps()
+        await system.pool._on_report(worker, "progressing", "Starting on the calculator.")
+        assert await until(lambda: steps() > before)
+        await asyncio.sleep(0.2)
+        assert len(said()) == 1, said()                      # routine progress: nothing sent
+
+        await system.pool._on_finish(worker, "done", "Built index.html")
+        assert await until(lambda: len(said()) == 2), said()
+        assert said()[1] == "Your calculator is ready!"
+
+        await system.human_message("thanks!", thread_key="s-0001")
+        assert await until(lambda: len(said()) == 3), said()
+        await asyncio.sleep(0.3)
+        assert said()[2:] == ["You're welcome!"]           # sent by reply, nothing doubled
+        await system.stop()
+
+    asyncio.run(run())

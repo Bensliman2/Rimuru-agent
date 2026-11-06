@@ -192,6 +192,24 @@ h3.mini {
 }
 .cid:hover { text-decoration: underline; }
 .find-head { color: var(--muted); font-size: 12.5px; margin: 12px 2px 8px; }
+.find-head:empty { display: none; }
+.mem-tree { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.mem-session { border: 1px solid var(--border); border-radius: 12px; padding: 10px; }
+.mem-session.other { border-style: dashed; }
+.mem-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  padding: 2px 4px 8px; }
+.mem-title { font-weight: 650; font-size: 14.5px; }
+.mem-sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+.mem-clone {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; margin-top: 6px;
+  padding: 8px 10px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: inherit; font: inherit;
+}
+.mem-clone:hover { border-color: var(--accent); }
+.mem-clone.on { border-color: var(--accent); background: var(--accent-soft); }
+.mem-clone > svg { width: 16px; height: 16px; color: var(--faint); flex-shrink: 0; }
+.mem-files { margin: 0; padding-left: 18px; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; }
+#found .who-head { margin-bottom: 4px; }
 #find-results .row.on { border-color: var(--accent); background: var(--accent-soft); }
 #find-results .fe-icon { width: 26px; height: 26px; }
 .found-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 6px; }
@@ -297,3 +315,7 @@ h3.mini {
   .views { padding: 0 8px; }
   .rule, .mrow, .crow { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* the Clones tab: one group per session, like Memory */
+#clone-list { gap: 10px; }
+.clone-group .mem-head { align-items: center; }

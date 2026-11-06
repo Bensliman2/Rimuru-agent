@@ -17,6 +17,7 @@ themselves (s3.2).
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ import hashlib
 
 from ..agent.tools import ToolRegistry, b, enum, obj, register_recall, s
 from ..ids import new_id
+from ..sessions import display
 from ..models import Job, Session, Task
 
 SYSTEM_PROMPT = """You are a Worker session inside a Super-agent called Rimuru.
@@ -135,11 +137,15 @@ class WorkerAgent:
         shell: Any = None,
         resume_note: str | None = None,
         root: Path | None = None,
+        own_folder: bool = False,
     ) -> None:
         self.task = task
-        # Its folder: the session's own, or the shared workspace for other work.
+        # Its folder: the session's own, or the practice folder for other work.
         self.root = Path(root or config.workspace).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self.where = display(self.root)
+        # A folder the person picked holds their own files, not just Rimuru's.
+        self.own_folder = own_folder
         self.session = session
         self.store = store
         self.bus = bus
@@ -158,7 +164,7 @@ class WorkerAgent:
             SYSTEM_PROMPT
             + {"docker": SANDBOX_NOTE, "host": HOST_NOTE}.get(
                 getattr(shell, "kind", "simulated"), NO_SHELL_NOTE)
-            + (QUICK_NOTE if getattr(config, "build_style", "quick") == "quick" else "")
+            + QUICK_NOTE
             + (SPECULATIVE_NOTE if speculative else "")
         )
         self.loop = AgentLoop(
@@ -189,6 +195,18 @@ class WorkerAgent:
             brief += (
                 f"You are subscribed to thread {self.task.thread_id}, so follow-up "
                 f"events on it will arrive here directly.\n\n"
+            )
+        brief += (
+            f"Your folder on the person's computer is {self.where}/ (inside the sandbox it is "
+            f"/workspace). When you mention files, name them from that folder - for example "
+            f"index.html - never /workspace/...\n\n"
+        )
+        if self.own_folder:
+            brief += (
+                "This is the person's own folder, picked by them, and it may already hold "
+                "their work. Look at what is there before you change anything, build on it "
+                "rather than starting over, and never delete or rename a file you did not "
+                "create unless they asked for exactly that.\n\n"
             )
         if resume_note:
             brief += resume_note.rstrip() + "\n\n"
@@ -389,14 +407,20 @@ class WorkerAgent:
         return f"Stopped {job_id}."
 
     # ------------------------------------------------------------------ #
+    def _real_paths(self, text: str) -> str:
+        """The sandbox calls the folder /workspace; the person knows it by its real
+        place. Found in the speed benchmark: a result said "open /workspace/todo.html"."""
+        # A function, not a string: a Windows path's backslashes are not escapes.
+        return re.sub(r"(?<![\w.])/workspace(?=/|\b)", lambda _m: self.where, text)
+
     async def _tool_report(self, args: dict[str, Any], loop: AgentLoop) -> str:
         status = str(args.get("status") or "progressing")
-        text = str(args.get("text") or "").strip()
+        text = self._real_paths(str(args.get("text") or "").strip())
         await self.on_report(self, status, text)
         return "Reported to the Router."
 
     async def _tool_finish(self, args: dict[str, Any], loop: AgentLoop) -> str:
-        summary = str(args.get("summary") or "").strip()
+        summary = self._real_paths(str(args.get("summary") or "").strip())
         outcome = str(args.get("outcome") or "done")
         await self.on_finish(self, outcome, summary)
         loop.request_stop(status="done")

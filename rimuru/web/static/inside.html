@@ -250,21 +250,22 @@
   <section class="view" id="view-memory" role="tabpanel">
     <div class="hood-grid even">
       <section class="block">
-        <div class="block-head"><h2>Find anything</h2></div>
-        <p class="muted">Type a word or two - from something you asked, a job, a person - and
-          pick from the list. No codes to remember.</p>
+        <div class="block-head"><h2>Session by session</h2></div>
+        <p class="muted">Everything Rimuru did, grouped by session: the clones it sent and the job
+          each one did. Pick a clone to see its work - or search for a word.</p>
         <form class="lookup" id="find-form" autocomplete="off">
-          <input id="find-q" placeholder="For example: calculator" spellcheck="false"
+          <input id="find-q" placeholder="Search, for example: calculator" spellcheck="false"
                  aria-label="Search what Rimuru knows">
           <button class="ghost" type="submit"><svg><use href="#i-search"/></svg>Search</button>
         </form>
         <div class="find-head" id="find-head"></div>
-        <div class="list scroll" id="find-results"></div>
+        <div class="list scroll" id="find-results" hidden></div>
+        <div class="scroll mem-tree" id="memory-tree"></div>
       </section>
       <section class="block">
-        <div class="block-head"><h2 id="found-title">What Rimuru knows about it</h2></div>
-        <div id="found"><p class="muted">Pick something on the left to see everything Rimuru
-          knows about it.</p></div>
+        <div class="block-head"><h2 id="found-title">Pick a clone</h2></div>
+        <div id="found"><p class="muted">Pick a clone on the left to see the job it did, what it
+          reported and the files it changed.</p></div>
       </section>
     </div>
     <section class="block">

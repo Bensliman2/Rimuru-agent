@@ -2,7 +2,7 @@
 
     python run.py speed probe                       how fast each model writes
     python run.py speed run --label NAME            the everyday tasks, timed and checked
-           [--clone-model ID] [--style quick|thorough] [--tasks web-calculator,todo-page,bug-fix]
+           [--clone-model ID] [--tasks web-calculator,todo-page,bug-fix]
     python run.py speed compare                     every run so far, side by side
 
 Each task runs in its own fresh workspace and database (data/speed/<label>/<task>/),
@@ -195,25 +195,30 @@ def _models_file(path: Path, clone_model: str | None) -> None:
     catalog.save(run)
 
 
-async def run_task(label: str, task_id: str, *, clone_model: str | None, style: str,
+async def run_task(label: str, task_id: str, *, clone_model: str | None,
                    cap: float, demo: bool = False) -> dict:
     from rimuru.system import RimuruSystem
     from rimuru.web.friendly import test_summary
+
+    from types import SimpleNamespace
+
+    from rimuru.sessions import folder_name, title_from
 
     task = TASKS[task_id]
     base = OUT / label / task_id
     if base.exists():
         shutil.rmtree(base)
-    ws = base / "workspace"
+    # The request goes in as a chat session, so its clone works in that session's
+    # folder - named after the request, exactly as the app names it.
+    ws = base / "sessions" / folder_name(SimpleNamespace(title=title_from(task["ask"]), key="direct"))
     if task["seed"]:
         shutil.copytree(task["seed"], ws, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
     ws.mkdir(parents=True, exist_ok=True)
     _models_file(base / "models.toml", clone_model)
 
     config = Config()
-    config.db_path, config.workspace = base / "rimuru.db", ws
+    config.db_path, config.workspace, config.sessions_dir = base / "rimuru.db", base / "practice", base / "sessions"
     config.models_path, config.demo, config.provider = base / "models.toml", demo, ""
-    config.build_style = style
     system = RimuruSystem(config, speed=1.0)
     if config.is_demo() and not demo:
         raise SystemExit("Models are not ready: " + "; ".join(config.setup.check()))
@@ -265,7 +270,7 @@ async def run_task(label: str, task_id: str, *, clone_model: str | None, style: 
     finished = [t.finished_ts for t in store.tasks.values() if t.finished_ts]
     router = store.sessions.get("rtr_main")
     result = {
-        "label": label, "task": task_id, "style": style,
+        "label": label, "task": task_id,
         "clone model": workers[0].model if workers else None,
         "router model": router.model if router else None,
         "first reply s": round(said[0]["ts"] - t0, 1) if said else None,
@@ -300,13 +305,12 @@ HEADER = (f"{'run':<16} {'task':<15} {'reply':>6} {'tests ok':>7} {'done':>7} "
           f"{'tokens':>7} {'tok/s':>6} {'thinking':>9} {'code':>7} {'works':>5}")
 
 
-async def run_all(label: str, task_ids: list[str], clone_model: str | None, style: str,
+async def run_all(label: str, task_ids: list[str], clone_model: str | None,
                   cap: float, demo: bool = False) -> list[dict]:
     rows = []
     for task_id in task_ids:
         print(f"[{label}] {task_id}: \"{TASKS[task_id]['ask']}\"", flush=True)
-        rows.append(await run_task(label, task_id, clone_model=clone_model, style=style, cap=cap,
-                                   demo=demo))
+        rows.append(await run_task(label, task_id, clone_model=clone_model, cap=cap, demo=demo))
         print(HEADER + "\n" + _row(rows[-1]), flush=True)
     (OUT / label / "results.json").write_text(json.dumps(rows, indent=2, default=str))
     return rows
@@ -332,8 +336,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--models", default="", help="probe: comma-separated model IDs (default: all)")
     parser.add_argument("--label", default="run", help="run: a name for this run")
     parser.add_argument("--clone-model", default=None, help="run: the clones' model ID for this run")
-    parser.add_argument("--style", default=None, choices=["quick", "thorough"],
-                        help="run: how clones work (default: the configured RIMURU_BUILD_STYLE)")
     parser.add_argument("--tasks", default=",".join(TASKS), help="run: comma-separated tasks")
     parser.add_argument("--cap", type=float, default=25.0, help="run: minutes per task at most")
     parser.add_argument("--demo", action="store_true", help=argparse.SUPPRESS)   # dry run, no AI
@@ -345,8 +347,7 @@ def main(argv: list[str]) -> int:
         unknown = [t for t in tasks if t not in TASKS]
         if unknown:
             parser.error(f"unknown task(s): {', '.join(unknown)} - choose from {', '.join(TASKS)}")
-        asyncio.run(run_all(args.label, tasks, args.clone_model, args.style or CONFIG.build_style,
-                            args.cap * 60, demo=args.demo))
+        asyncio.run(run_all(args.label, tasks, args.clone_model, args.cap * 60, demo=args.demo))
     else:
         compare()
     return 0

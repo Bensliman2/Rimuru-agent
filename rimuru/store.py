@@ -216,6 +216,12 @@ class Store:
             self.bus.emit("thread.created", thread=thread.to_dict())
         return thread
 
+    def put_thread(self, thread: Thread) -> Thread:
+        self._persist_thread(thread)
+        if self.bus:
+            self.bus.emit("thread.updated", thread_id=thread.id)
+        return thread
+
     def _persist_thread(self, thread: Thread) -> None:
         self._write(
             "INSERT OR REPLACE INTO threads "

@@ -120,8 +120,10 @@ the tools.
 
 ### Recommendation
 
-**Put the clones on `kimi-k2.7-code-highspeed` and keep the quick build style** (it is
-the default). It was the fastest on every task and passed every check. Choose
+*Since this benchmark, the quick way is the only way clones build - the old way was removed.*
+
+**Put the clones on `kimi-k2.7-code-highspeed`.** It was the fastest on every task and
+passed every check. Choose
 `kimi-k3.1-pro-highspeed` instead if you would rather every build came with tests: it
 was roughly half as fast, and it wrote the most tests. Keep `kimi-k3.1-pro` for work
 where speed does not matter. Switch it in the app with **Models**, under Clones.

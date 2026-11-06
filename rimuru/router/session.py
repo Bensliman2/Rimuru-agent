@@ -27,8 +27,8 @@ from ..ids import ROUTER_SESSION_ID, new_id
 from ..models import Session, Task
 from ..recall import spill_digest
 
-# Added in quick build style (the default): people judge an assistant by how fast
-# they get something that works.
+# People judge an assistant by how fast they get something that works
+# (docs/speed.md: the same calculator took 14.6 minutes the old way, 1.9 now).
 QUICK_NOTE = """
 SPEED
   People judge you by how fast they get something that works. When you
@@ -82,11 +82,15 @@ CHANNEL MANNERS
 
 THE DIRECT CHAT (channel "console")
   This is a conversation with one person, who may have no technical background.
+  - Only the reply tool reaches the person. Text you write outside a tool call
+    is never shown to them, so every answer - even a one-line one - goes
+    through reply.
   - Plain, warm, short. No jargon, and never show internal IDs (trg_, thr_, wrk_,
     tsk_, job_) - those are for you, not them.
   - When you take something on, say in one line what you will do. When work
     finishes, say what they now have and how to use it. Mention a file name only
-    when it helps them.
+    when it helps them - with the folder from the result ("files:"), so they can
+    find it on their computer.
   - Workers are NOT subscribed to this chat - you own it. If the person adds
     detail about something already in progress, pass it on with message_worker
     (the worker is shown next to each task). If they ask how it is going, answer
@@ -152,8 +156,7 @@ class RouterAgent:
             store=store,
             bus=bus,
             config=config,
-            system_prompt=SYSTEM_PROMPT + (
-                QUICK_NOTE if getattr(config, "build_style", "quick") == "quick" else ""),
+            system_prompt=SYSTEM_PROMPT + QUICK_NOTE,
             registry=self.registry,
             role="router",
             budget_chars=config.router_context_budget,
@@ -163,14 +166,62 @@ class RouterAgent:
         )
         # A person's message cuts in on a turn that something else started.
         self.loop.cut_in = lambda injection: injection.kind == "human"
+        # An answer written but never sent still reaches the person (_after_turn).
+        self.loop.on_turn_end = self._after_turn
+        self._replied_ts = 0.0
 
     # ------------------------------------------------------------------ #
     def start(self) -> None:
         self.loop.start()
         self.store.touch_session(self.session, status="idle")
 
-    def inject(self, text: str, trigger_id: str | None = None) -> None:
-        self.loop.inject(text, kind="event", trigger_id=trigger_id)
+    def inject(self, text: str, trigger_id: str | None = None, **meta: Any) -> None:
+        # meta "waiting": the chat thread a person is waiting on for this news.
+        self.loop.inject(text, kind="event", trigger_id=trigger_id, **meta)
+
+    # ------------------------------------------------------------------ #
+    # an answer that was written but never sent
+    # ------------------------------------------------------------------ #
+    async def _after_turn(self, text: str) -> None:
+        """Send the turn's last text when the model forgot to call reply.
+
+        Found in use with a free model: it answered a person's question in plain
+        text, and announced a finished job the same way - so the person saw
+        nothing at all. Only when the turn sent no reply anywhere, and exactly
+        one chat session is waiting on it (a person's message, or the end of
+        their job); otherwise there is no telling where the text belongs.
+        """
+        text = (text or "").strip()
+        if not text or self._replied_ts >= self.loop.turn_opened_ts:
+            return
+        waiting = self._waiting_threads(self.loop.turn_events)
+        if len(waiting) != 1:
+            return
+        thread = self.store.threads.get(waiting.pop())
+        if thread is None:
+            return
+        sent, _note = await self.channels.send(thread.channel, thread.key, text)
+        self._replied_ts = time.time()
+        self.bus.emit("agent.replied", thread_id=thread.id, channel=thread.channel,
+                      thread_key=thread.key, text=sent)
+        self.bus.emit("router.unsent_answer", thread_id=thread.id)
+
+    def _waiting_threads(self, events: list[Any]) -> set[str]:
+        conv = self.config.conversation_channels
+        out: set[str] = set()
+        for injection in events:
+            thread_id = None
+            if injection.kind == "human":
+                trigger = self.store.triggers.get(injection.trigger_id or "")
+                # Not when Rimuru chose to stay quiet on it (ignore).
+                if trigger is not None and not (trigger.verdict_reason or "").startswith("router:"):
+                    thread_id = trigger.thread_id
+            else:
+                thread_id = injection.meta.get("waiting")
+            thread = self.store.threads.get(thread_id or "")
+            if thread is not None and thread.channel in conv:
+                out.add(thread.id)
+        return out
 
     # ------------------------------------------------------------------ #
     # tools
@@ -370,6 +421,7 @@ class RouterAgent:
                               "new message comes in with this result.")
 
         sent, note = await self.channels.send(thread.channel, thread.key, text)
+        self._replied_ts = time.time()
         self.bus.emit(
             "agent.replied", thread_id=thread.id, channel=thread.channel,
             thread_key=thread.key, text=sent,

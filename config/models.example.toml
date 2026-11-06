@@ -11,7 +11,8 @@
 #   filter    judges group-chat messages. Optional: uses the router's model.
 #
 # Each [models.<name>] is one model you can use. The name is yours to pick.
-#   provider     kimi | anthropic | openai | deepseek | ollama | custom
+#   provider     kimi | anthropic | openai | deepseek | ollama | custom, or a free tier:
+#                kilo (no key) | groq | gemini | mistral | openrouter | nvidia | zai | cohere
 #   model        the model's ID at that provider
 #   base_url     optional; needed for custom (kimi finds its region from the key)
 #   api_key_env  optional; the .env variable holding the key. Defaults:

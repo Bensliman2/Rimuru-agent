@@ -79,7 +79,7 @@
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("on", v.id === `view-${view}`));
     if (remember) history.replaceState(null, "", `#${view}${view === "clones" && state.clone ? `/${state.clone}` : ""}`);
     if (view === "messages" && !state.rulesLoaded) renderRules();
-    if (view === "memory" && !found.length) find($("find-q").value.trim());
+    if (view === "memory") loadMemory();
     window.scrollTo(0, 0);
     renderView();
     renderFeeds();
@@ -238,12 +238,34 @@
       state.clone = (cards.find(isLive) || cards[0] || {}).id || null;
     }
     $("clones-count").textContent = cards.length ? `(${cards.length})` : "";
-    setHTML($("clone-list"), cards.map((c) => `<button class="clone-row${c.id === state.clone ? " on" : ""}" data-clone="${esc(c.id)}">
+    const row = (c) => `<button class="clone-row${c.id === state.clone ? " on" : ""}" data-clone="${esc(c.id)}">
         ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c) })}
         <span class="row-main"><span class="row-title">${esc(c.title)}</span>
           <span class="row-sub">${esc(DOING[c.stage] || c.activity)} &middot; ${ago(c.elapsed)}${
-            c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</span></span></button>`).join("")
-      || '<p class="muted">No clones yet. Ask Rimuru for something in the chat, or start a practice run.</p>');
+            c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</span></span></button>`;
+    // Grouped by the session each clone works for - the busiest, most recent
+    // session first - and work from no session (practice runs, team channels) last.
+    const groups = new Map();
+    for (const c of cards) {
+      const key = c.session ? c.session.key : "";
+      if (!groups.has(key)) {
+        groups.set(key, { key, title: c.session ? c.session.title : "Practice runs and team channels", cards: [] });
+      }
+      groups.get(key).cards.push(c);
+    }
+    const latest = (g) => Math.max(...g.cards.map((c) => c.started_ts || 0));
+    const live = (g) => g.cards.filter(isLive).length;
+    const order = [...groups.values()].sort((a, b) =>
+      (!a.key - !b.key) || (!live(a) - !live(b)) || (latest(b) - latest(a)));
+    setHTML($("clone-list"), order.map((g) => {
+      const n = g.cards.length;
+      const rows = [...g.cards].sort((a, b) => (isLive(b) - isLive(a)) || ((b.started_ts || 0) - (a.started_ts || 0)));
+      return `<div class="mem-session clone-group${g.key ? "" : " other"}">
+        <div class="mem-head"><div><div class="mem-title">${esc(g.title)}</div>
+          <div class="mem-sub">${live(g) ? `${live(g)} working &middot; ` : ""}${n} clone${n === 1 ? "" : "s"}</div></div>
+          ${g.key ? `<a class="ghost small" href="/#chat=${encodeURIComponent(g.key)}">Open in the chat</a>` : ""}</div>
+        <div class="list">${rows.map(row).join("")}</div></div>`;
+    }).join("") || '<p class="muted">No clones yet. Ask Rimuru for something in the chat, or start a practice run.</p>');
     renderThreads();
 
     const c = cards.find((x) => x.id === state.clone);
@@ -343,6 +365,7 @@
 
   /* ================================================================ memory */
   function renderMemory(o) {
+    if (!$("find-q").value.trim()) loadMemory();
     setHTML($("notes"), (o.notes || []).length
       ? o.notes.slice().reverse().map((n) => `<li>${linkIds(esc(n.note))}</li>`).join("")
       : '<li class="muted">Nothing yet. Rimuru keeps short notes here that it will need across jobs.</li>');
@@ -359,7 +382,9 @@
     let r;
     try { r = await api(`/api/search?q=${encodeURIComponent(q || "")}`); } catch { return; }
     found = r.items;
-    $("find-head").textContent = !q ? "Most recent" :
+    $("find-results").hidden = !q;
+    $("memory-tree").hidden = !!q;
+    $("find-head").textContent = !q ? "" :
       r.total ? `${r.total} found${r.total > r.items.length ? `, showing the newest ${r.items.length}` : ""}`
         : `Nothing matches “${q}”. Try another word.`;
     $("find-results").innerHTML = found.map((it, i) => {
@@ -400,6 +425,69 @@
       $("found").innerHTML = head + `<p class="muted">Could not look that up: ${esc(err.message)}</p>`;
     }
   }
+  // Session by session: each session, its clones, and the job each one did.
+  const since = (ts) => {
+    const s = Date.now() / 1000 - ts;
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+    return new Date(ts * 1000).toLocaleDateString([], { day: "numeric", month: "short" });
+  };
+  const outcome = (c) => ({
+    working: `${DOING[c.stage] || "Working"} now`, waiting: "Waiting for a free spot",
+    done: `Done in ${ago(c.elapsed)}`, failed: "Couldn't finish", stopped: "Stopped",
+    interrupted: "Interrupted by a restart",
+  }[c.phase] || c.phase);
+  let memory = null;
+  let pickedClone = null;
+  async function loadMemory() {
+    try { memory = await api("/api/memory"); } catch { return; }
+    const group = (g, other) => `<div class="mem-session${other ? " other" : ""}">
+      <div class="mem-head"><div>
+        <div class="mem-title">${esc(g.title)}</div>
+        <div class="mem-sub">${g.clones.length ? `${g.clones.length} clone${g.clones.length === 1 ? "" : "s"}` : "No clones yet"}${
+          g.folder ? ` &middot; files in <code>${esc(g.folder)}/</code>` : ""}${other ? "" : ` &middot; ${since(g.last_ts)}`}</div>
+        </div>${other ? "" : `<a class="ghost small" href="/#chat=${encodeURIComponent(g.key)}">Open in the chat</a>`}</div>
+      ${g.clones.map((c) => `<button class="mem-clone${c.id === pickedClone ? " on" : ""}" data-clone-detail="${esc(c.id)}">
+        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c) })}
+        <span class="row-main"><span class="row-title">${esc(c.title)}</span>
+          <span class="row-sub">${esc(outcome(c))}${c.files.length ? ` &middot; ${c.files.length} file${c.files.length === 1 ? "" : "s"}` : ""}${
+            c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</span></span>
+        ${icon("chevron")}</button>`).join("")}
+    </div>`;
+    setHTML($("memory-tree"), memory.sessions.map((g) => group(g, false)).join("") +
+      (memory.other.clones.length ? group(memory.other, true) : "") ||
+      '<p class="muted">Nothing yet. Start a session in the chat, and its clones appear here.</p>');
+  }
+  $("memory-tree").addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-clone-detail]");
+    if (b) showClone(b.dataset.cloneDetail);
+  });
+
+  async function showClone(id) {
+    pickedClone = id;
+    $("memory-tree").querySelectorAll(".mem-clone").forEach((n) =>
+      n.classList.toggle("on", n.dataset.cloneDetail === id));
+    let d;
+    try { d = await api(`/api/work/${encodeURIComponent(id)}`); } catch { return; }
+    const c = d.card;
+    const session = memory && [...memory.sessions, memory.other].find((g) => g.clones.some((x) => x.id === id));
+    $("found-title").textContent = c.title;
+    $("found").innerHTML = `
+      <div class="who-head">${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c) })}
+        <div><p class="muted">${esc(outcome(c))}${session ? ` &middot; in “${esc(session.title)}”` : ""}</p></div></div>
+      ${d.asked ? `<h3 class="mini">The job it was given</h3><div class="box">${esc(d.asked)}</div>` : ""}
+      ${c.result ? `<h3 class="mini">What it reported</h3><div class="box">${esc(c.result)}</div>` : ""}
+      ${c.files.length ? `<h3 class="mini">Files it changed</h3>
+        <p class="muted small">In <code>${esc(d.folder)}/</code></p>
+        <ul class="mem-files">${c.files.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
+      ${c.tests ? `<h3 class="mini">Tests</h3><p>${esc(c.tests)}</p>` : ""}
+      <div class="found-actions">
+        <button class="ghost small" data-session="${esc(c.id)}">Every step it took</button>
+        ${session && session.key ? `<a class="ghost small" href="/#chat=${encodeURIComponent(session.key)}">Open the session in the chat</a>` : ""}
+      </div>`;
+  }
+
   // Clicking an ID anywhere still works: it is shown here.
   function lookUp(id) {
     if (id) showFound({ kind: "", id, title: id, ts: Date.now() / 1000 });
@@ -423,7 +511,7 @@
       <button class="ghost small danger" data-sim="stop">Stop it</button></div>` : "");
     setHTML($("practice"), PRACTICE.map((p) => `<div class="drill">
       <div><div class="drill-name">${esc(p.name)}</div><div class="drill-about">${esc(p.about)}${
-        p.replaces ? ' <span class="note">Replaces the files in data/workspace.</span>' : ""}${
+        p.replaces ? ' <span class="note">Replaces the files in data/practice - never your sessions.</span>' : ""}${
         !o.demo ? ' <span class="note">Uses your models, so it costs tokens.</span>' : ""}</div></div>
       <button class="ghost" data-start="${p.id}"${sim.running ? " disabled" : ""}>${icon("play")}Start</button></div>`).join(""));
   }
@@ -432,7 +520,7 @@
     if (!b) return;
     const p = PRACTICE.find((x) => x.id === b.dataset.start);
     const warn = [];
-    if (p.replaces) warn.push("It replaces the files in data/workspace with a practice project.");
+    if (p.replaces) warn.push("It replaces the files in data/practice with a practice project (your sessions are not touched).");
     if (state.overview && !state.overview.demo) warn.push("It uses your real models, so it costs tokens.");
     if (warn.length && !confirm(`Start “${p.name}”?\n\n${warn.join("\n")}`)) return;
     try {

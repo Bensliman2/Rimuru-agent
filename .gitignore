@@ -3,8 +3,6 @@ __pycache__/
 .venv/
 venv/
 .env
-data/*.db
-data/*.db-journal
 *.log
 .DS_Store
 
@@ -13,16 +11,11 @@ token
 token.txt
 *.token
 
-# What the clones build is your data, not source code
-data/workspace/
+# Everything in data/ is yours - chats, jobs, what the clones built, test and
+# benchmark runs, any --data folder - never source code to share.
+data/
 
 # Your model choices (no secrets - but they are yours, not the project's)
 config/models.toml
 config/*.tmp
 .env.tmp
-
-# Session folders, demo data, benchmark and evaluation runs
-data/sessions/
-data/demo/
-data/speed/
-data/eval/

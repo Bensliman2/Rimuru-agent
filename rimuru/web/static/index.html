@@ -114,6 +114,15 @@
       <span><b>Demo mode.</b> <span id="demo-why">No AI model is set up yet, so nothing real is built.</span></span>
       <button type="button" id="demo-setup">Choose models</button>
     </div>
+    <div class="folder-bar" id="folder-bar">
+      <svg class="fb-icon"><use href="#i-folder"/></svg>
+      <div class="fb-text">
+        <span class="fb-label" id="fb-label">New folder for this session</span>
+        <span class="fb-path" id="fb-path"></span>
+      </div>
+      <button type="button" class="ghost small" id="fb-open" hidden>Open</button>
+      <button type="button" class="ghost small" id="fb-change">Change</button>
+    </div>
     <div class="messages" id="messages">
       <div class="welcome" id="welcome">
         <svg class="welcome-mark"><use href="#mark-rimuru"/></svg>
@@ -152,7 +161,6 @@
       <summary><svg><use href="#i-chevron"/></svg>Finished <span id="finished-count"></span></summary>
       <div class="clone-list" id="finished"></div>
     </details>
-    <p class="files-note" id="files-note" hidden></p>
   </aside>
 </main>
 
@@ -185,6 +193,46 @@
   <footer class="set-foot">
     <button class="primary" id="set-save" disabled>Save changes</button>
     <span class="set-note" id="set-note" role="status"></span>
+  </footer>
+</section>
+
+<!-- where a session works -->
+<section class="panel settings" id="folders" role="dialog" aria-modal="true" aria-labelledby="folders-title" hidden>
+  <header class="panel-head">
+    <span class="panel-mark set-mark"><svg><use href="#i-folder"/></svg></span>
+    <div class="panel-titles">
+      <h2 id="folders-title">Where this session works</h2>
+      <div class="panel-sub">Its clones read and write files only in this folder.</div>
+    </div>
+    <button class="icon-btn" id="folders-close" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+  </header>
+  <div class="panel-body" id="folders-body">
+    <div class="fp-choices" role="radiogroup" aria-label="Where to work">
+      <label class="fp-choice"><input type="radio" name="fp-kind" value="made" checked>
+        <span><b>Rimuru's own folder for this session</b>
+          <span>Made for you and named after the first job. Best for something new.</span></span></label>
+      <label class="fp-choice"><input type="radio" name="fp-kind" value="picked">
+        <span><b>A folder on this computer</b>
+          <span>A project you already have, or a new folder where you like - on the Desktop, in Documents&hellip;</span></span></label>
+    </div>
+    <div class="fp-browser" id="fp-browser" hidden>
+      <div class="fp-places" id="fp-places"></div>
+      <div class="fp-where">
+        <button type="button" class="icon-btn" id="fp-up" aria-label="Up one folder"><svg><use href="#i-chevron"/></svg></button>
+        <div class="fp-current"><b id="fp-name"></b><span id="fp-path"></span></div>
+      </div>
+      <div class="fp-list" id="fp-list" role="listbox" aria-label="Folders"></div>
+      <div class="fp-new">
+        <input id="fp-new-name" placeholder="New folder name" aria-label="New folder name" maxlength="80">
+        <button type="button" class="ghost small" id="fp-new">Make it here</button>
+      </div>
+      <p class="fp-warn">Clones can add, change and delete files in the folder you pick. Pick a
+        folder for this work - not one full of personal files.</p>
+    </div>
+  </div>
+  <footer class="set-foot">
+    <button class="primary" id="folders-use">Use this</button>
+    <span class="set-note" id="folders-note" role="status"></span>
   </footer>
 </section>
 

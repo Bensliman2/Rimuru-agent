@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-WORKSPACE = Path(os.environ.get("RIMURU_WORKSPACE", "data/workspace")).resolve()
+WORKSPACE = Path(os.environ.get("RIMURU_WORKSPACE", "data/practice")).resolve()
 SOURCE = WORKSPACE / "units" / "converter.py"
 
 

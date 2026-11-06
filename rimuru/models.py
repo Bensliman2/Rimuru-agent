@@ -85,6 +85,10 @@ class Thread:
     # Subscriptions are many-to-many: a Worker may watch several Threads and a
     # Thread may have several subscribed Workers (article s3.2).
     subscribers: list[str] = field(default_factory=list)
+    # Chat sessions only (rimuru/sessions.py): the folder the person picked for
+    # the session's work, and the one Rimuru made for it when they did not.
+    folder: str = ""
+    rimuru_folder: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -104,6 +108,7 @@ class Task:
     started_ts: float | None = None
     finished_ts: float | None = None
     attempt: int = 1              # 2 after one automatic resume following a restart
+    folder: str = ""              # where its clone worked, even if the session moves later
 
     @property
     def duration(self) -> float | None:

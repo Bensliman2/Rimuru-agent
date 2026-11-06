@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 from ..context import inline_trigger
 from ..ids import new_id
 from ..llm import build_client
 from ..models import TERMINAL, Session, Task
-from ..sessions import folder_for
+from ..sessions import claim_folder, is_session, name_session
 from .session import WorkerAgent
 
 
@@ -85,6 +86,13 @@ class WorkerPool:
         ))
 
         thread = self.store.threads.get(thread_id or task.thread_id or "")
+        if task.folder:                  # resumed after a restart: the same folder as before
+            root = Path(task.folder)
+        else:
+            if is_session(thread, self.config):
+                name_session(self.store, thread, task.title, task.id)
+            root = claim_folder(self.config, self.store, thread, task.title)
+            self.store.update_task(task, folder=str(root))
         worker = WorkerAgent(
             task=task,
             session=session,
@@ -98,7 +106,9 @@ class WorkerPool:
             speculative=speculative,
             shell=self.shell,
             resume_note=resume_note,
-            root=folder_for(self.config, thread),
+            root=root,
+            own_folder=bool(thread is not None and getattr(thread, "folder", "")
+                            and Path(thread.folder) == root),
         )
         self.workers[session.id] = worker
         self.store.update_task(task, worker_id=session.id, status="queued")
@@ -221,9 +231,12 @@ class WorkerPool:
             self.router.inject(
                 f'{prefix}Task [{task.id}] "{task.title}" finished as {outcome}.\n'
                 f"worker: {worker.session.id}\n"
-                f"thread: {thread_id}\nchannel: {channel}\n\n"
+                f"thread: {thread_id}\nchannel: {channel}\n"
+                f"files: {worker.where}/\n\n"
                 f"{summary}\n\n"
                 f"Tell whoever asked, in that channel's register.",
+                # Whoever asked is waiting to hear (speculative work may stay quiet).
+                waiting=None if worker.speculative else task.thread_id,
             )
 
     async def handback(self, worker: WorkerAgent, trigger_id: str, reason: str) -> bool:

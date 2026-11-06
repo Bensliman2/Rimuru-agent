@@ -71,6 +71,35 @@ PROVIDERS: dict[str, Provider] = {p.id: p for p in (
              hint="A key from platform.deepseek.com."),
     Provider("ollama", "Ollama (on this computer)", "openai", "http://localhost:11434/v1",
              hint="Runs models on your own machine. No key needed; Ollama must be running."),
+    # Free tiers (github.com/mnfst/awesome-free-llm-apis). Free plans are rate
+    # limited, and several may keep or log what you send: nothing confidential.
+    Provider("kilo", "Kilo Code (free, no key)", "openai", "https://api.kilo.ai/api/gateway",
+             hint="Free models with no account and no key, about 200 requests an hour. Pick a "
+                  "model ending in :free. Prompts may be logged - send nothing confidential."),
+    Provider("groq", "Groq (free tier)", "openai", "https://api.groq.com/openai/v1", "GROQ_API_KEY",
+             hint="Very fast. A free key from console.groq.com/keys - no credit card; "
+                  "about 30 requests a minute and 1,000 a day."),
+    Provider("gemini", "Google Gemini (free tier)", "openai",
+             "https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY",
+             hint="A free key from aistudio.google.com/app/apikey - no credit card. Free-tier "
+                  "prompts may be used by Google to improve its products."),
+    Provider("mistral", "Mistral (free mode)", "openai", "https://api.mistral.ai/v1", "MISTRAL_API_KEY",
+             hint="A free key from console.mistral.ai/api-keys - no credit card. Free-mode "
+                  "prompts may train Mistral's models unless you opt out."),
+    Provider("openrouter", "OpenRouter (free models)", "openai", "https://openrouter.ai/api/v1",
+             "OPENROUTER_API_KEY",
+             hint="A free key from openrouter.ai/keys; models ending in :free cost nothing, "
+                  "about 50 requests a day."),
+    Provider("nvidia", "NVIDIA NIM (free)", "openai", "https://integrate.api.nvidia.com/v1",
+             "NVIDIA_API_KEY",
+             hint="A free key with the NVIDIA Developer Program (build.nvidia.com); about 40 "
+                  "requests a minute. Use is logged - nothing confidential."),
+    Provider("zai", "Z AI - GLM (free models)", "openai", "https://api.z.ai/api/paas/v4", "ZAI_API_KEY",
+             hint="A free key from z.ai; GLM-4.7-Flash is free, one request at a time."),
+    Provider("cohere", "Cohere (free trial)", "openai", "https://api.cohere.ai/compatibility/v1",
+             "COHERE_API_KEY",
+             hint="A free trial key from dashboard.cohere.com - 1,000 calls a month, "
+                  "non-commercial use only."),
     Provider("custom", "Other OpenAI-compatible server", "openai", "", "CUSTOM_API_KEY",
              hint="vLLM, LM Studio, OpenRouter and others: give the server's address."),
 )}
@@ -225,7 +254,8 @@ HEADER = """\
 #   filter    judges group-chat messages. Optional: uses the router's model.
 #
 # Each [models.<name>] is one model you can use:
-#   provider     kimi | anthropic | openai | deepseek | ollama | custom
+#   provider     kimi | anthropic | openai | deepseek | ollama | custom, or a free tier:
+#                kilo (no key) | groq | gemini | mistral | openrouter | nvidia | zai | cohere
 #   model        the model's ID at that provider
 #   base_url     optional; needed for custom (kimi finds its region from the key)
 #   api_key_env  optional; the .env variable holding the key (default per provider:

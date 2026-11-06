@@ -7,6 +7,8 @@
     python run.py bench --scenario smoke --speed 1
                                                    real-model test with a pass/fail verdict
     python run.py --demo                           no AI model at all (offline stand-in)
+    python run.py hands --connect http://PC:8810 --code CODE --root FOLDER
+                                                   on another machine: let sessions work there
 
 Which model does which job is set in config/models.toml - or with the Models
 button in the app. API keys live in .env.
@@ -393,6 +395,11 @@ def main() -> int:
 
     logging.basicConfig(level=logging.WARNING,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    if sys.argv[1:2] == ["hands"]:
+        # The remote hands, on another machine (rimuru/hands/daemon.py).
+        from rimuru.hands.daemon import main as hands_main
+
+        return hands_main(sys.argv[2:])
     if sys.argv[1:2] == ["speed"]:
         # How long everyday requests take, end to end (scenarios/speed/run_speed.py).
         # It has its own options, so it gets the command line as it is.

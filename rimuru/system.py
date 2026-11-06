@@ -32,6 +32,7 @@ from .llm.base import Msg
 from .models import TERMINAL, Trigger
 from .recall import describe_graph
 from .connections import Connections
+from .hands.hub import HandsHub
 from .safety import notice_for_person
 from .sessions import title_from, title_of
 from .router.filtering import EventFilter
@@ -143,6 +144,9 @@ class RimuruSystem:
 
         # Telegram and GitHub, when their tokens are set (rimuru/connections.py).
         self.connections = Connections(self)
+        # Other machines a session can work on (rimuru/hands/).
+        self.hands = HandsHub(self.config, self.bus)
+        self.pool.hands = self.hands
 
         # Whatever was mid-flight when the process last died.
         self.recovered = self._mark_interrupted()
@@ -296,6 +300,8 @@ class RimuruSystem:
         self.router.start()
         self.watchdog.start()
         await self.connections.start()
+        if self.hands.machines:
+            await self.hands.listen()
         self.bus.emit(
             "system.started",
             demo=self.config.is_demo(),
@@ -431,6 +437,7 @@ class RimuruSystem:
 
     async def stop(self) -> None:
         await self.connections.stop()
+        await self.hands.stop()
         self.sim.stop()
         self.watchdog.stop()
         self.router.loop.request_stop(status="stopped")

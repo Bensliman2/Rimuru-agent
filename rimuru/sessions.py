@@ -63,8 +63,12 @@ def folder_for(config: Any, thread: Any) -> Path:
 
 
 def folder_kind(thread: Any) -> str:
-    """'picked' (the person's own folder), 'made' (Rimuru's), or 'new' (none yet)."""
-    if getattr(thread, "folder", ""):
+    """'picked' (the person's own folder), 'remote' (a folder on another machine,
+    rimuru/hands), 'made' (Rimuru's), or 'new' (none yet)."""
+    folder = str(getattr(thread, "folder", "") or "")
+    if folder.startswith("hands://"):
+        return "remote"
+    if folder:
         return "picked"
     return "made" if getattr(thread, "rimuru_folder", "") else "new"
 

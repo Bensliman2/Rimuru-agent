@@ -115,6 +115,27 @@ when it is done Rimuru opens a **draft** pull request and links it in the thread
 never merges. The copy's git folder is kept out of the clone's reach, so nothing a
 clone - or a hostile repository - writes can run on your computer through git.
 
+**Other machines - the remote hands.** A session can work in a folder on another
+computer - a server, a second PC - while Rimuru keeps thinking on this one. In
+Connections, click **Add a machine**: it shows a command with a one-time code. On the
+other machine (with Rimuru's folder copied there and `pip install -r requirements.txt`
+done), run it with the folder to share:
+
+```bash
+python run.py hands --connect http://<this PC>:8810 --code ABCD2345 --root C:\work
+```
+
+It connects out to Rimuru - nothing opens on that machine - and from then on a
+session's **Change** offers "A folder on another machine". Over there, files are
+read and written only inside the shared folders, and commands run in that machine's
+own Docker sandbox (none at all without Docker, unless it was started with
+`--allow-host-commands`). Pairing codes work once, for 10 minutes; Rimuru keeps only
+a hash of each machine's secret; **Remove** cuts a machine off. Rimuru listens for
+machines on a port of its own (8810, `RIMURU_HANDS_PORT`), which answers nothing but
+them and refuses any web page; the app itself still answers this computer only. Use
+it on your own network, or across the internet only through a private network such
+as Tailscale - never an open port.
+
 ## Under the hood
 
 **Under the hood** (the link at the top of the app) shows how Rimuru works, live, in

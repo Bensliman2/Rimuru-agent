@@ -805,3 +805,9 @@ a.event { text-decoration: none; }
 .primary.small { padding: 6px 12px; font-size: 13px; }
 .session-sub .via { font-size: 11px; font-weight: 650; color: var(--accent-strong); background: var(--accent-soft);
   padding: 0 6px; border-radius: 6px; margin-right: 6px; }
+
+/* other machines: the pairing box */
+.pairing { margin-top: 10px; padding: 12px; border: 1px dashed var(--accent); border-radius: 12px; background: var(--accent-soft); }
+.pairing p { font-size: 13px; margin: 0 0 6px; }
+.pairing pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
+  padding: 8px 10px; margin: 6px 0; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }

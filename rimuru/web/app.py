@@ -25,6 +25,8 @@ from ..llm import catalog
 from ..recall import recall as do_recall
 from .. import connections as conn
 from .. import folders
+from ..hands import remote
+from ..hands.hub import RemoteError as HandsRemoteError, Unavailable as HandsUnavailable
 from ..channels.github_live import GitHubChannel, Problem as GitHubProblem
 from ..channels.telegram import Problem as TelegramProblem, TelegramChannel
 from .. import memory as long_memory
@@ -77,9 +79,16 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
     allowed_hosts = LOCAL_HOSTS | {CONFIG.host.lower()} | {
         h.strip().lower() for h in os.environ.get("RIMURU_ALLOWED_HOSTS", "").split(",") if h.strip()}
     open_host = CONFIG.host in {"0.0.0.0", "::"}
+    # Unless the person serves the app beyond this computer on purpose, only this
+    # computer gets an answer - by the caller's address, not only the Host header.
+    # (Other machines reach Rimuru only through the remote hands' own port.)
+    beyond = open_host or bool(os.environ.get("RIMURU_ALLOWED_HOSTS", "").strip())
+    here = {"127.0.0.1", "::1", "localhost", "testclient"}
 
-    def _foreign(headers, method: str) -> str | None:
+    def _foreign(headers, method: str, caller: str | None = None) -> str | None:
         host = headers.get("host", "")
+        if not beyond and caller and caller not in here and not caller.startswith("127."):
+            return "This app only answers on this computer."
         if not open_host and _host_of(host) not in allowed_hosts:
             return "This app only answers on this computer."
         origin = headers.get("origin")
@@ -90,7 +99,8 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def local_only(request, call_next):
-        refused = _foreign(request.headers, request.method)
+        refused = _foreign(request.headers, request.method,
+                           request.client.host if request.client else None)
         if refused:
             return JSONResponse({"error": refused}, status_code=403)
         return await call_next(request)
@@ -154,6 +164,12 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         """Where a session works, for the folder bar above the chat."""
         thread = session_thread(key)
         kind = chats.folder_kind(thread) if thread is not None else "new"
+        if kind == "remote":
+            machine_id, where = remote.parse(thread.folder) or ("", "")
+            online = machine_id in system.hands.links
+            return {"kind": "remote", "name": re.split(r"[\\/]", where.rstrip("\\/"))[-1] or where,
+                    "path": where, "shown": where, "exists": False, "working": busy_in(thread),
+                    "machine": system.hands.name(machine_id), "online": online}
         path = chats.folder_for(system.config, thread) if thread is not None else None
         if kind == "new" and path is not None and path.exists():
             kind = "made"                # a session from before folders were stored
@@ -259,9 +275,16 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         if session is None or session.kind != "worker":
             raise HTTPException(404, f"no clone {worker_id}")
         task = system.store.tasks.get(session.task_id or "")
-        folder = task_folder(task)
+        far = remote.parse(task.folder) if task is not None else None
+        if far is not None:
+            # On another machine: named there, as "laptop:C:\work\site".
+            shown = f"{system.hands.name(far[0])}:{far[1]}"
+            where = {"folder": shown, "folder_abs": far[1]}
+        else:
+            folder = task_folder(task)
+            where = {"folder": chats.display(folder), "folder_abs": str(folder)}
         return {
-            "folder": chats.display(folder), "folder_abs": str(folder),
+            **where,
             "card": friendly.worker_card(system.store, session, system.config.conversation_channels),
             "asked": friendly.plain(task.brief) if task else "",
             "timeline": friendly.worker_timeline(system.store, session),
@@ -283,7 +306,15 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             raise HTTPException(409, "This session's clones are still working. Change its "
                                      "folder when they finish, or stop them first.")
         raw = str(payload.get("path") or "").strip()
-        if raw:
+        machine_id = str(payload.get("machine") or "").strip()
+        if machine_id and raw:
+            # A folder on another machine: it checks the folder is one it shares.
+            try:
+                found = await system.hands.request(machine_id, "dirs", path=raw, timeout=20)
+            except (HandsUnavailable, HandsRemoteError) as exc:
+                raise HTTPException(400, str(exc)) from None
+            thread.folder = remote.ref(machine_id, str(found["path"]))
+        elif raw:
             try:
                 thread.folder = str(folders.check(raw, system.config))
             except ValueError as exc:
@@ -292,6 +323,37 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             thread.folder = ""
         store.put_thread(thread)
         return {"ok": True, "folder": folder_info(key)}
+
+    # ------------------------------------------------------------------ #
+    # other machines (rimuru/hands/)
+    # ------------------------------------------------------------------ #
+    @app.get("/api/hands")
+    async def hands_status() -> dict[str, Any]:
+        return system.hands.status()
+
+    @app.post("/api/hands/pair")
+    async def hands_pair() -> dict[str, Any]:
+        """A one-time code, and the command to run on the other machine."""
+        await system.hands.listen()
+        code = system.hands.new_code()
+        return {**system.hands.status(), "code": code, "command": system.hands.command(code),
+                "expires_in": 600}
+
+    @app.post("/api/hands/dirs")
+    async def hands_dirs(payload: dict[str, Any]) -> dict[str, Any]:
+        """The folders on another machine, to pick a session's folder from."""
+        try:
+            return await system.hands.request(str(payload.get("machine") or ""), "dirs",
+                                              path=str(payload.get("path") or ""), timeout=20)
+        except (HandsUnavailable, HandsRemoteError) as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.delete("/api/hands/{machine_id}")
+    async def hands_remove(machine_id: str) -> dict[str, Any]:
+        if machine_id not in system.hands.machines:
+            raise HTTPException(404, "No such machine.")
+        await system.hands.remove(machine_id)
+        return system.hands.status()
 
     @app.post("/api/folders")
     async def list_folders(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -312,6 +374,8 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         """Open the session's folder in File Explorer. Only that folder: the path
         is the session's, never one taken from the request."""
         info = folder_info(session_key(payload.get("chat")))
+        if info["kind"] == "remote":
+            raise HTTPException(400, f"That folder is on {info['machine']} - open it there.")
         if info["kind"] == "new":
             raise HTTPException(404, "This session has no folder yet. Rimuru makes one when "
                                      "its first job starts.")
@@ -454,7 +518,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
         # Browsers let any page open a WebSocket, so check who is asking.
-        if _foreign(socket.headers, "WS"):
+        if _foreign(socket.headers, "WS", socket.client.host if socket.client else None):
             await socket.close(code=1008)
             return
         await socket.accept()

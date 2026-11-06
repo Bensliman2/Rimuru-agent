@@ -30,6 +30,7 @@ from ..ids import new_id
 from ..sessions import display
 from ..models import Job, Session, Task
 from ..safety import hidden_instructions, warning_for_model
+from .files import LocalFiles, Refused
 from .shell import check_packages, deps_dir_for
 
 SYSTEM_PROMPT = """You are a Worker session inside a Super-agent called Rimuru.
@@ -146,12 +147,22 @@ class WorkerAgent:
         own_folder: bool = False,
         restore: dict[str, Any] | None = None,
         memories: str = "",
+        files: Any = None,
+        where: str | None = None,
     ) -> None:
         self.task = task
-        # Its folder: the session's own, or the practice folder for other work.
-        self.root = Path(root or config.workspace).resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.where = display(self.root)
+        if files is not None:
+            # A folder on another machine (rimuru/hands): its files and its
+            # commands go there; nothing is made on this computer.
+            self.files = files
+            self.root = Path(str(root or "."))
+            self.where = where or str(root)
+        else:
+            # Its folder: the session's own, or the practice folder for other work.
+            self.root = Path(root or config.workspace).resolve()
+            self.root.mkdir(parents=True, exist_ok=True)
+            self.where = display(self.root)
+            self.files = LocalFiles(self.root)
         # A folder the person picked holds their own files, not just Rimuru's.
         self.own_folder = own_folder
         # Packages installed for this folder live outside it (shell.install).
@@ -489,40 +500,33 @@ class WorkerAgent:
         )
 
     # ------------------------------------------------------------------ #
-    def _safe_path(self, raw: str) -> Path | None:
-        workspace = self.root
-        candidate = (workspace / raw).resolve()
-        try:
-            candidate.relative_to(workspace)
-        except ValueError:
-            return None
-        return candidate
-
+    # files - through self.files: this computer, or a folder on another machine
+    # ------------------------------------------------------------------ #
     async def _tool_list_files(self, args: dict[str, Any], loop: AgentLoop) -> str:
-        root = self._safe_path(str(args.get("path") or "."))
-        if root is None:
+        try:
+            found = await self.files.list(str(args.get("path") or "."))
+        except Refused:
             return "Refused: that path is outside the workspace."
-        if not root.exists():
+        except Exception as exc:  # noqa: BLE001 - e.g. the other machine went away
+            return f"Could not list the files: {exc}"
+        if found is None:
             return f"No such directory: {args.get('path') or '.'}"
-        workspace = self.root
-        found = sorted(
-            str(p.relative_to(workspace)).replace("\\", "/")
-            for p in root.rglob("*")
-            if p.is_file() and "__pycache__" not in p.parts and ".pytest_cache" not in p.parts
-        )
         if not found:
             return "(no files)"
         more = f"\n... and {len(found) - 200} more" if len(found) > 200 else ""
         return "\n".join(found[:200]) + more
 
     async def _tool_read_file(self, args: dict[str, Any], loop: AgentLoop) -> str:
-        path = self._safe_path(str(args.get("path") or ""))
-        if path is None:
+        raw = str(args.get("path") or "")
+        try:
+            text = await self.files.read(raw)
+            name = self.files.name(raw)
+        except Refused:
             return "Refused: that path is outside the workspace."
-        if not path.is_file():
-            return f"No such file: {args.get('path')}"
-        text = path.read_text(encoding="utf-8", errors="replace")
-        name = path.relative_to(self.root).as_posix()
+        except Exception as exc:  # noqa: BLE001
+            return f"Could not read {raw}: {exc}"
+        if text is None:
+            return f"No such file: {raw}"
         warning = self._scan(text, f"This file ({name})", f"{name} (in {self.where}/)")
         return (f"{warning}version: {_version(text)}  (pass as base_version to write_file)\n"
                 f"{text[:20000]}")
@@ -543,13 +547,16 @@ class WorkerAgent:
     # erasing that change (the lost update the evaluation caught).
     async def _tool_write_file(self, args: dict[str, Any], loop: AgentLoop) -> str:
         raw = str(args.get("path") or "")
-        path = self._safe_path(raw)
-        if path is None:
-            return "Refused: that path is outside the workspace."
         content = str(args.get("content") or "")
         base = str(args.get("base_version") or "").strip()
-        if path.exists():
-            current = _version(path.read_text(encoding="utf-8", errors="replace"))
+        try:
+            existing = await self.files.read(raw)
+        except Refused:
+            return "Refused: that path is outside the workspace."
+        except Exception as exc:  # noqa: BLE001
+            return f"Could not write {raw}: {exc}"
+        if existing is not None:
+            current = _version(existing)
             if not base:
                 return (f"Refused: {raw} already exists. Read it first and pass its version "
                         f"as base_version - or use edit_file for a targeted change. "
@@ -558,21 +565,25 @@ class WorkerAgent:
                 return (f"Refused: {raw} changed since you read it - another clone may have "
                         f"edited it. Nothing was written. Read it again, merge your changes "
                         f"into the new content, and retry (or use edit_file).")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        try:
+            await self.files.write(raw, content)
+        except Exception as exc:  # noqa: BLE001
+            return f"Could not write {raw}: {exc}"
         return f"Wrote {len(content)} chars to {raw} (new version: {_version(content)})"
 
     async def _tool_edit_file(self, args: dict[str, Any], loop: AgentLoop) -> str:
         raw = str(args.get("path") or "")
-        path = self._safe_path(raw)
-        if path is None:
-            return "Refused: that path is outside the workspace."
-        if not path.is_file():
-            return f"No such file: {raw}. Use write_file to create it."
         old, new = str(args.get("old") or ""), str(args.get("new") or "")
+        try:
+            text = await self.files.read(raw)
+        except Refused:
+            return "Refused: that path is outside the workspace."
+        except Exception as exc:  # noqa: BLE001
+            return f"Could not read {raw}: {exc}"
+        if text is None:
+            return f"No such file: {raw}. Use write_file to create it."
         if not old:
             return "Refused: 'old' is empty. Give the exact text to replace."
-        text = path.read_text(encoding="utf-8", errors="replace")
         count = text.count(old)
         if count == 0:
             return (f"Refused: that text is not in {raw} - it may have been changed by "
@@ -581,7 +592,10 @@ class WorkerAgent:
             return (f"Refused: that text appears {count} times in {raw}. Include more "
                     f"surrounding lines so it is unique, or set replace_all.")
         text = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
-        path.write_text(text, encoding="utf-8")
+        try:
+            await self.files.write(raw, text)
+        except Exception as exc:  # noqa: BLE001
+            return f"Could not write {raw}: {exc}"
         return f"Edited {raw} (new version: {_version(text)})"
 
     async def _tool_install(self, args: dict[str, Any], loop: AgentLoop) -> str:

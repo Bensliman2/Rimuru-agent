@@ -219,6 +219,9 @@
       <label class="fp-choice"><input type="radio" name="fp-kind" value="picked">
         <span><b>A folder on this computer</b>
           <span>A project you already have, or a new folder where you like - on the Desktop, in Documents&hellip;</span></span></label>
+      <label class="fp-choice" id="fp-remote-choice" hidden><input type="radio" name="fp-kind" value="remote">
+        <span><b>A folder on another machine</b>
+          <span>One you connected in Connections - a server, a second PC. Rimuru thinks here; the work happens there.</span></span></label>
     </div>
     <div class="fp-browser" id="fp-browser" hidden>
       <div class="fp-places" id="fp-places"></div>
@@ -227,7 +230,7 @@
         <div class="fp-current"><b id="fp-name"></b><span id="fp-path"></span></div>
       </div>
       <div class="fp-list" id="fp-list" role="listbox" aria-label="Folders"></div>
-      <div class="fp-new">
+      <div class="fp-new" id="fp-new-row">
         <input id="fp-new-name" placeholder="New folder name" aria-label="New folder name" maxlength="80">
         <button type="button" class="ghost small" id="fp-new">Make it here</button>
       </div>

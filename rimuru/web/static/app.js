@@ -73,7 +73,7 @@
   /* ------------------------------------------------------------- where a session works */
   // Each session works in one folder: Rimuru's own folder for it (the default),
   // or a folder the person picks on their computer. Shown above the chat.
-  const F = { info: null, kind: "made", data: null };
+  const F = { info: null, kind: "made", data: null, machines: [], machine: null };
 
   function renderFolder(info) {
     const i = F.info = info || { kind: "new", working: false };
@@ -83,7 +83,8 @@
       path.textContent = ""; path.hidden = true;
       $("folder-bar").title = "Its files go in a new folder, made when the first job starts. Change to pick your own.";
     } else {
-      $("fb-label").textContent = i.kind === "picked" ? `Your folder: ${i.name}` : `Folder: ${i.name}`;
+      $("fb-label").textContent = i.kind === "remote" ? `On ${i.machine}${i.online ? "" : " (away)"}: ${i.name}`
+        : i.kind === "picked" ? `Your folder: ${i.name}` : `Folder: ${i.name}`;
       path.textContent = i.path; path.hidden = false;
       $("folder-bar").title = `This session's files are in ${i.path}`;
     }
@@ -100,9 +101,12 @@
     if (F.info && F.info.working) return;
     $("scrim").hidden = false; $("folders").hidden = false;
     fnote("", "");
-    const picked = F.info && F.info.kind === "picked";
+    try { F.machines = (await api("/api/hands")).machines; } catch { F.machines = []; }
+    $("fp-remote-choice").hidden = !F.machines.length;
+    const kind = F.info ? F.info.kind : "new";
     F.data = null;
-    setKind(picked ? "picked" : "made", picked ? F.info.path : null);
+    if (kind === "remote" && F.machines.length) setKind("remote");
+    else setKind(kind === "picked" ? "picked" : "made", kind === "picked" ? F.info.path : null);
   }
   function closeFolders() {
     $("folders").hidden = true;
@@ -111,22 +115,60 @@
   function setKind(kind, startAt = null) {
     F.kind = kind;
     document.querySelectorAll('input[name="fp-kind"]').forEach((r) => { r.checked = r.value === kind; });
-    $("fp-browser").hidden = kind !== "picked";
+    $("fp-browser").hidden = kind === "made";
+    $("fp-new-row").hidden = kind === "remote";
+    F.data = kind === F.dataKind ? F.data : null;
     if (kind === "picked" && !F.data) browse(startAt);
+    if (kind === "remote") {
+      const online = F.machines.filter((m) => m.online);
+      F.machine = (online.find((m) => m.id === F.machine) || online[0] || {}).id || null;
+      if (F.machine) browseRemote("");
+      else { renderRemote({ path: "", dirs: [] }); fnote("None of your machines is connected right now.", "warn"); }
+    }
     updateUse();
   }
   function updateUse() {
     const use = $("folders-use");
     if (F.kind === "made") { use.disabled = false; use.textContent = "Use Rimuru's folder"; return; }
     const d = F.data;
+    if (F.kind === "remote") {
+      use.disabled = !(d && d.path);
+      use.textContent = d && d.path ? `Use “${d.name}”` : "Pick a folder";
+      return;
+    }
     use.disabled = !(d && d.usable);
     use.textContent = d ? `Use “${d.name}”` : "Use this folder";
+  }
+  // A folder on another machine: its shared folders, browsed over the connection.
+  async function browseRemote(path) {
+    let d;
+    try { d = await post("/api/hands/dirs", { machine: F.machine, path }); }
+    catch (e) { fnote(e.message, "bad"); return; }
+    renderRemote(d);
+  }
+  function renderRemote(d) {
+    const name = d.path ? d.path.split(/[\\/]/).filter(Boolean).pop() || d.path : "";
+    F.data = { ...d, name, usable: !!d.path };
+    F.dataKind = "remote";
+    $("fp-name").textContent = d.path ? name : "Folders it shares";
+    $("fp-path").textContent = d.path || "";
+    $("fp-up").disabled = !d.path;
+    $("fp-places").innerHTML = F.machines.filter((m) => m.online).map((m) =>
+      `<button type="button" class="fp-place${m.id === F.machine ? " on" : ""}" data-machine="${esc(m.id)}">${esc(m.name)}</button>`).join("");
+    $("fp-list").innerHTML = (d.dirs || []).map((x) =>
+      `<button type="button" class="fp-row" data-path="${esc(x.path)}">${icon("folder")}<span>${esc(x.name)}</span>
+        <svg class="chev"><use href="#i-chevron"/></svg></button>`).join("") ||
+      '<p class="fp-empty">No folders inside. Use this one.</p>';
+    $("fp-list").scrollTop = 0;
+    if (d.path) fnote("", "");
+    updateUse();
   }
   async function browse(path) {
     let d;
     try { d = await post("/api/folders", { path }); }
     catch (e) { fnote(e.message, "bad"); return; }
     F.data = d;
+    F.dataKind = "picked";
     $("fp-name").textContent = d.name;
     $("fp-path").textContent = d.path;
     $("fp-up").disabled = !d.parent;
@@ -151,11 +193,12 @@
     } catch (e) { fnote(e.message, "bad"); }
   }
   async function useFolder() {
-    const path = F.kind === "picked" ? (F.data && F.data.path) : "";
-    if (F.kind === "picked" && !path) return;
+    const path = F.kind !== "made" ? (F.data && F.data.path) : "";
+    if (F.kind !== "made" && !path) return;
     $("folders-use").disabled = true;
     try {
-      const r = await post("/api/session/folder", { chat: state.chat || "direct", path });
+      const r = await post("/api/session/folder", { chat: state.chat || "direct", path,
+        machine: F.kind === "remote" ? F.machine : undefined });
       renderFolder(r.folder);
       closeFolders();
       refresh();
@@ -178,12 +221,17 @@
   $("folders-use").addEventListener("click", useFolder);
   $("fp-new").addEventListener("click", makeFolder);
   $("fp-new-name").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); makeFolder(); } });
-  $("fp-up").addEventListener("click", () => { if (F.data && F.data.parent) browse(F.data.parent); });
+  $("fp-up").addEventListener("click", () => {
+    if (F.kind === "remote") { if (F.data && F.data.path) browseRemote(F.data.parent || ""); return; }
+    if (F.data && F.data.parent) browse(F.data.parent);
+  });
   document.querySelectorAll('input[name="fp-kind"]').forEach((r) =>
     r.addEventListener("change", () => setKind(r.value)));
   $("folders").addEventListener("click", (ev) => {
     const b = ev.target.closest(".fp-place, .fp-row");
-    if (b) browse(b.dataset.path);
+    if (!b) return;
+    if (F.kind !== "remote") { browse(b.dataset.path); return; }
+    if (b.dataset.machine) { F.machine = b.dataset.machine; browseRemote(""); } else browseRemote(b.dataset.path);
   });
 
   function switchSession(key) {
@@ -813,13 +861,14 @@
     }
   }
 
-  // Copy a folder's full path, to paste into File Explorer or Finder.
+  // Copy a folder's full path (or a command) - and put the button's label back after.
   document.addEventListener("click", async (ev) => {
     const b = ev.target.closest("[data-copy]");
     if (!b) return;
+    const label = b.dataset.label || (b.dataset.label = b.textContent);
     try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied"; }
     catch { b.textContent = b.dataset.copy; }
-    setTimeout(() => { b.textContent = b.closest(".folder-line") ? "Copy folder path" : "Copy path"; }, 1800);
+    setTimeout(() => { b.textContent = label; }, 1800);
   });
 
   $("models-btn").addEventListener("click", openSettings);
@@ -927,8 +976,35 @@
   async function openConnections() {
     $("scrim").hidden = false; $("connections").hidden = false;
     cnote("Tokens are kept in your .env file and never shown again.", "");
-    try { renderConnections(await api("/api/connections")); }
-    catch (e) { $("conn-body").innerHTML = `<p class="form-error">${esc(e.message)}</p>`; }
+    try {
+      renderConnections(await api("/api/connections"));
+      renderMachines(await api("/api/hands"));
+    } catch (e) { $("conn-body").innerHTML = `<p class="form-error">${esc(e.message)}</p>`; }
+  }
+
+  // Other machines: sessions can work in a folder there (rimuru/hands).
+  function renderMachines(h, pairing) {
+    let box = $("conn-machines");
+    if (!box) {
+      box = document.createElement("section");
+      box.className = "conn"; box.id = "conn-machines";
+      $("conn-body").appendChild(box);
+    }
+    const runs = (m) => m.docker ? "commands in its Docker sandbox" : m.host_commands ? "commands right on that machine" : "no commands";
+    box.innerHTML = `
+      <div class="conn-head"><h3>Other machines</h3>${stateTag(h.machines.some((m) => m.online) ? "connected" : "off")}</div>
+      <p class="conn-what">Let a session work in a folder on another computer - a server, a second PC. Rimuru thinks here; the files and commands are there, only in the folders that machine shares.</p>
+      ${h.problem ? `<p class="form-error">${esc(h.problem)}</p>` : ""}
+      ${h.machines.length ? `<ul class="conn-people">${h.machines.map((m) => `<li><span><b>${esc(m.name)}</b>
+          <span class="muted">${m.online ? "connected" : "away"} &middot; shares ${esc(m.roots.join(", ") || "nothing")} &middot; ${runs(m)}</span></span>
+          <button class="ghost small danger" data-hands-remove="${esc(m.id)}">Remove</button></li>`).join("")}</ul>` : ""}
+      ${pairing ? `<div class="pairing">
+          <p>On the other machine - with Rimuru's folder copied there and <code>pip install -r requirements.txt</code> done - run:</p>
+          <pre>${esc(pairing.command)}</pre>
+          <div class="conn-row"><button class="ghost small" data-copy="${esc(pairing.command)}">Copy the command</button>
+            <span class="muted">Code <b>${esc(pairing.code)}</b> works once, for 10 minutes.</span></div>
+          <p class="conn-hint">Replace the end with the folder to share. Your firewall may ask about Python on this PC: allow it on private networks only. Over the internet, use a private network such as Tailscale - never an open port.</p>
+        </div>` : `<div class="conn-row"><button class="primary small" data-act="hands-pair">Add a machine</button></div>`}`;
   }
   function closeConnections() {
     $("connections").hidden = true;
@@ -936,8 +1012,11 @@
   }
   async function connAct(promise, done) {
     cnote("Checking…", "");
-    try { renderConnections(await promise); cnote(done, "ok"); refresh(); }
-    catch (e) { cnote(e.message, "bad"); }
+    try {
+      renderConnections(await promise);
+      renderMachines(await api("/api/hands"));
+      cnote(done, "ok"); refresh();
+    } catch (e) { cnote(e.message, "bad"); }
   }
   $("conn-body").addEventListener("click", (ev) => {
     const b = ev.target.closest("button");
@@ -954,6 +1033,13 @@
     } else if (b.dataset.act === "gh-save") {
       connAct(post("/api/connections/github", { token: $("gh-token").value.trim(),
         repos: $("gh-repos").value, allowed: $("gh-allowed").value }), "Saved. Rimuru is watching.");
+    } else if (b.dataset.act === "hands-pair") {
+      post("/api/hands/pair").then((r) => { renderMachines(r, r); cnote(r.problem || "Waiting for the other machine to connect.", r.problem ? "bad" : ""); })
+        .catch((e) => cnote(e.message, "bad"));
+    } else if (b.dataset.handsRemove) {
+      if (!confirm("Remove this machine? Sessions working there stop reaching it.")) return;
+      api(`/api/hands/${encodeURIComponent(b.dataset.handsRemove)}`, { method: "DELETE" })
+        .then((h) => { renderMachines(h); cnote("Removed.", "ok"); }).catch((e) => cnote(e.message, "bad"));
     } else if (b.dataset.act === "tg-off" || b.dataset.act === "gh-off") {
       const which = b.dataset.act === "tg-off" ? "telegram" : "github";
       if (!confirm(`Disconnect ${which === "telegram" ? "Telegram" : "GitHub"}? Its token is removed from .env.`)) return;

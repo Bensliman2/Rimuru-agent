@@ -21,6 +21,8 @@ from ..context import inline_trigger
 from ..ids import new_id
 from ..llm import build_client
 from ..models import TERMINAL, Session, Task
+from ..hands import remote
+from ..hands.remote import RemoteFiles, RemoteShell
 from ..sessions import claim_folder, is_session, name_session
 from .session import WorkerAgent
 
@@ -54,6 +56,8 @@ class WorkerPool:
         # is done - GitHub: a draft pull request; Telegram: the files are sent.
         self.preparers: dict[str, Any] = {}
         self.finishers: dict[str, Any] = {}
+        # Other machines a session may work on (rimuru/hands/hub.py), set by the system.
+        self.hands: Any = None
 
         # Every way a worker loop can end - finish(), a stop, the step cap, a
         # crash - funnels through here, so tasks never get stuck as "running"
@@ -105,16 +109,31 @@ class WorkerPool:
             ))
 
         thread = self.store.threads.get(thread_id or task.thread_id or "")
+        picked = str(getattr(thread, "folder", "") or "") if thread is not None else ""
         if task.folder:                  # resumed after a restart: the same folder as before
-            root = Path(task.folder)
+            folder = task.folder
         elif thread is not None and (prepare := self.preparers.get(thread.channel)):
-            root = Path(await prepare(thread, task))
-            self.store.update_task(task, folder=str(root))
+            folder = str(await prepare(thread, task))
         else:
             if is_session(thread, self.config):
                 name_session(self.store, thread, task.title, task.id)
-            root = claim_folder(self.config, self.store, thread, task.title)
-            self.store.update_task(task, folder=str(root))
+            folder = picked if remote.parse(picked) else str(
+                claim_folder(self.config, self.store, thread, task.title))
+        if not task.folder:
+            self.store.update_task(task, folder=folder)
+
+        # A folder on another machine (rimuru/hands): files and commands go there.
+        files = where = None
+        shell = self.shell
+        root: Any = Path(folder)
+        if (on := remote.parse(folder)) is not None and self.hands is not None:
+            machine_id, root = on
+            info = self.hands.machines.get(machine_id, {})
+            files = RemoteFiles(self.hands, machine_id, root)
+            shell = RemoteShell(self.hands, machine_id, root, docker=bool(info.get("docker")))
+            if not info.get("docker") and info.get("host_commands"):
+                shell.kind = "host"
+            where = f"{self.hands.name(machine_id)}:{root}"
         worker = WorkerAgent(
             task=task,
             session=session,
@@ -126,14 +145,16 @@ class WorkerPool:
             on_finish=self._on_finish,
             on_handback=self.handback,
             speculative=speculative,
-            shell=self.shell,
+            shell=shell,
             resume_note=resume_note,
             root=root,
-            own_folder=bool(thread is not None and getattr(thread, "folder", "")
-                            and Path(thread.folder) == root),
+            own_folder=bool(picked and picked == folder) or bool(
+                picked and not remote.parse(picked) and Path(picked) == Path(folder)),
             restore=restore,
             memories=memory.for_clone(self.store.memories.values(),
                                       thread.key if is_session(thread, self.config) else ""),
+            files=files,
+            where=where,
         )
         self.workers[session.id] = worker
         self.store.update_task(task, worker_id=session.id, status="queued")

@@ -354,3 +354,145 @@ h3.mini {
 /* clones' names and personas */
 .row-name { font-weight: 650; color: var(--accent-strong); margin-right: 4px; }
 .persona-line { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+
+/* Rimuru's turns, picked by session */
+.block-head .hint-icon.inline { margin-left: 0; }
+.block-head .hint-icon.inline .tip { right: auto; left: 0; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: -2px 0 12px; }
+.chips:empty { display: none; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 260px;
+  padding: 5px 6px 5px 12px; border-radius: 99px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  transition: background-color .15s, border-color .15s, color .15s, transform .15s;
+}
+.chip .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .n {
+  min-width: 20px; padding: 0 6px; border-radius: 99px; text-align: center; line-height: 18px;
+  font-size: 11px; background: var(--surface-2); color: var(--muted);
+}
+.chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); transform: translateY(-1px); }
+.chip:active { transform: translateY(0); }
+.chip.on {
+  color: var(--accent-strong); background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.chip.on .n { background: var(--accent); color: var(--on-accent, #fff); }
+.chip.other { border-style: dashed; }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tag.about { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600;
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+
+/* ------------------------------------------------------------------ the Guide */
+.guide { max-width: 880px; width: 100%; }
+.guide-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 12px; }
+.guide-pick label {
+  display: flex; flex-direction: column; gap: 5px; min-width: 0;
+  font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
+}
+.guide-pick select {
+  width: 100%; font: inherit; font-size: 13.5px; font-weight: 500; letter-spacing: 0; text-transform: none;
+  color: var(--text); padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface-2); cursor: pointer; transition: border-color .15s, background-color .15s;
+}
+.guide-pick select:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.guide-pick select:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+.guide-pick select:disabled { color: var(--faint); cursor: default; }
+.guide-quick { margin: 0 0 12px; }
+.guide-quick .chip { padding: 6px 13px; max-width: 100%; }
+.guide-log {
+  display: flex; flex-direction: column; gap: 14px; min-height: 200px; max-height: calc(100vh - 480px);
+  overflow-y: auto; padding: 16px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border);
+}
+.g-empty { margin: auto; }
+.g-msg { display: flex; gap: 10px; max-width: 86%; }
+.g-msg.you { align-self: flex-end; flex-direction: column; align-items: flex-end; }
+.g-bubble { padding: 9px 13px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.g-msg.you .g-bubble { background: var(--user); color: #fff; border-radius: 14px 14px 4px 14px; }
+.g-msg.guide .g-bubble {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px 14px 14px 4px;
+  box-shadow: 0 1px 2px rgba(15, 27, 45, .04);
+}
+.g-msg.err .g-bubble { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+.g-bubble p { margin: 0; }
+.g-bubble p + p, .g-bubble p + ul, .g-bubble ul + p { margin-top: 6px; }
+.g-bubble ul { margin: 4px 0 0; padding-left: 18px; }
+.g-bubble li + li { margin-top: 3px; }
+.g-meta { font-size: 11.5px; color: var(--faint); margin-top: 4px; }
+.g-main { min-width: 0; }
+.g-icon {
+  display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; margin-top: 2px;
+  border-radius: 10px; background: var(--accent-soft); color: var(--accent);
+}
+.g-icon svg { width: 17px; height: 17px; }
+.g-dots { display: inline-flex; gap: 4px; padding: 6px 0; }
+.g-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); animation: blink 1.2s infinite ease-in-out; }
+.g-dots i:nth-child(2) { animation-delay: .2s; }
+.g-dots i:nth-child(3) { animation-delay: .4s; }
+.guide-ask { display: flex; gap: 8px; margin-top: 12px; }
+.guide-ask input {
+  flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text);
+  padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface);
+  transition: border-color .15s, box-shadow .15s;
+}
+.guide-ask input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.guide-ask .primary { display: inline-flex; align-items: center; gap: 6px; border-radius: 12px; padding: 0 18px; }
+.guide-ask .primary svg { width: 16px; height: 16px; }
+.guide-foot { display: flex; justify-content: flex-end; min-height: 22px; margin-top: 6px; }
+.wd-guide { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 13.5px; line-height: 1.5; }
+.wd-guide .link { font-weight: 650; }
+@media (max-width: 600px) {
+  .guide-pick { grid-template-columns: minmax(0, 1fr); }
+  .g-msg { max-width: 100%; }
+  .guide-log { max-height: 60vh; }
+}
+
+/* ------------------------------------------------------------------ buttons and tabs, polished */
+.views { gap: 4px; padding: 8px 20px; }
+.views button {
+  padding: 7px 13px; border: 0; border-radius: 10px;
+  transition: background-color .15s, color .15s, box-shadow .15s;
+}
+.views button:hover { color: var(--text); background: var(--surface-2); }
+.views button.on {
+  color: var(--accent-strong); background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.views button.on > svg:not(.tab-mark) { color: var(--accent); }
+.views button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.hood-page .ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  box-shadow: 0 1px 2px rgba(15, 27, 45, .05);
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s, transform .1s;
+}
+.hood-page .ghost:hover:not(:disabled) {
+  color: var(--accent-strong); background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.hood-page .ghost:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
+.hood-page .ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hood-page .ghost.small { border-radius: 99px; padding: 5px 13px; }
+.hood-page .ghost.danger { color: var(--bad); }
+.hood-page .ghost.danger:hover:not(:disabled) {
+  color: var(--bad); background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 55%, var(--border));
+}
+.hood-page .ghost.more { width: 100%; margin-top: 6px; border-style: dashed; box-shadow: none; color: var(--muted); }
+.drill .ghost { color: var(--accent-strong); padding: 7px 14px; border-radius: 99px; }
+
+/* rows and cards: a gentle lift on hover */
+.row, .clone-row, .mem-clone, .who {
+  transition: border-color .15s, background-color .15s, box-shadow .15s, transform .15s;
+}
+.row:hover, .clone-row:hover, .mem-clone:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  box-shadow: 0 2px 10px rgba(15, 27, 45, .07); transform: translateY(-1px);
+}
+.who:hover { box-shadow: 0 4px 18px rgba(15, 27, 45, .09); transform: translateY(-2px); }
+.clone-row.on, .mem-clone.on { box-shadow: inset 3px 0 0 var(--accent); }
+.turn-head { transition: background-color .15s; }
+.turn-head:hover { background: var(--surface-2); }
+@media (prefers-reduced-motion: reduce) {
+  .row, .clone-row, .mem-clone, .who, .chip, .hood-page .ghost { transition: none; transform: none !important; }
+}

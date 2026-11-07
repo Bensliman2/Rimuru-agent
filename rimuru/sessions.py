@@ -131,6 +131,8 @@ def name_session(store: Any, thread: Any, job_title: str, task_id: str = "") -> 
     buttons" reads better in the list than "hi i want a calculator i can use in
     my br...". Later jobs leave the name alone."""
     title = " ".join(str(job_title or "").split())
+    if title == "Write RIMURU.md: a guide to this project":      # /init (rimuru/commands.py)
+        return
     if not title or any(t.thread_id == thread.id and t.id != task_id
                         for t in store.tasks.values()):
         return

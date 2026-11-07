@@ -256,9 +256,16 @@
     smoothly(swapTo);
   }
   // Page changes fade instead of jumping, where the browser can.
-  const smoothly = (change) => (document.startViewTransition &&
-    !matchMedia("(prefers-reduced-motion: reduce)").matches)
-    ? document.startViewTransition(change) : change();
+  const smoothly = (change) => {
+    if (!document.startViewTransition || document.hidden
+        || matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
+    const fade = document.startViewTransition(change);
+    // A fade the browser skips (the tab went into the background) still makes
+    // the change; only the fade is lost - not worth an error in the console.
+    fade.ready.catch(() => {});
+    fade.finished.catch(() => {});
+    return fade;
+  };
   const newKey = () => "s-" + Array.from(crypto.getRandomValues(new Uint8Array(4)),
     (b) => b.toString(16).padStart(2, "0")).join("");
   function newSession() {
@@ -381,7 +388,7 @@
           cancelled: `Stopped: ${esc(m.title)}`,
         }[m.kind] || esc(m.title);
         const lead = m.kind === "done" ? `<svg class="check"><use href="#i-check"/></svg>`
-                                        : mark("clone");
+          : `<svg${tintOf(m) ? ` style="${tintOf(m).slice(1)}"` : ""}><use href="#mark-clone"/></svg>`;
         parts.push(`<button class="event ${m.kind}" data-worker="${esc(m.worker_id || "")}"
           title="See what the clone did">${lead}<span>${label}</span></button>`);
       } else if (m.role === "install") {
@@ -434,9 +441,54 @@
     input.style.overflowY = input.value && input.scrollHeight > 180 ? "auto" : "hidden";
     sendBtn.disabled = !input.value.trim() || state.busy;
   }
-  input.addEventListener("input", autosize);
+  input.addEventListener("input", () => { autosize(); slashUpdate(); });
   input.addEventListener("keydown", (e) => {
+    if (slash.open) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        slash.at = (slash.at + (e.key === "ArrowDown" ? 1 : -1) + slash.items.length) % slash.items.length;
+        slashUpdate();
+        return;
+      }
+      if (e.key === "Escape") { e.preventDefault(); slash.dismissed = input.value; slashUpdate(); return; }
+      const pick = slash.items[slash.at];
+      if ((e.key === "Tab" || e.key === "Enter") && pick && input.value.toLowerCase() !== `/${pick.name}`) {
+        e.preventDefault();
+        input.value = `/${pick.name}`;
+        autosize(); slashUpdate();
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  input.addEventListener("blur", () => { slash.open = false; $("slash-menu").hidden = true; });
+
+  // Commands, typed after "/": a small menu shows what there is (/init).
+  let COMMANDS = [{ name: "init", about: "Study this session's folder and write RIMURU.md - a guide every clone reads first" }];
+  api("/api/commands").then((d) => { if (d.items && d.items.length) COMMANDS = d.items; }).catch(() => {});
+  const CMD_RE = /^\/[A-Za-z][A-Za-z0-9_-]{0,30}(?:@\w+)?$/;
+  const slash = { open: false, items: [], at: 0, dismissed: null };
+  function slashUpdate() {
+    const v = input.value;
+    const typed = /^\/([A-Za-z0-9_-]*)$/.exec(v);
+    slash.items = typed ? COMMANDS.filter((c) => c.name.startsWith(typed[1].toLowerCase())) : [];
+    slash.open = slash.items.length > 0 && slash.dismissed !== v && document.activeElement === input;
+    if (slash.dismissed !== null && slash.dismissed !== v) slash.dismissed = null;
+    if (slash.at >= slash.items.length) slash.at = 0;
+    const menu = $("slash-menu");
+    menu.hidden = !slash.open;
+    if (slash.open) {
+      menu.innerHTML = slash.items.map((c, i) => `<button type="button" class="slash-item${i === slash.at ? " on" : ""}"
+        role="option" aria-selected="${i === slash.at}" data-cmd="${esc(c.name)}"><b>/${esc(c.name)}</b>
+        <span>${esc(c.about)}</span></button>`).join("");
+    }
+  }
+  $("slash-menu").addEventListener("mousedown", (e) => {
+    e.preventDefault();                     // keep the typing box focused
+    const b = e.target.closest("[data-cmd]");
+    if (!b) return;
+    input.value = `/${b.dataset.cmd}`;
+    autosize(); slashUpdate();
   });
   $("composer").addEventListener("submit", (e) => { e.preventDefault(); send(); });
 
@@ -444,16 +496,17 @@
     const text = (textOverride ?? input.value).trim();
     if (!text || state.busy) return;
     state.busy = true;
-    input.value = ""; autosize();
+    input.value = ""; autosize(); slashUpdate();
     try {
-      await post("/api/message", { text, thread_key: state.chat || "direct" });
+      if (CMD_RE.test(text)) await post("/api/command", { chat: state.chat || "direct", text });
+      else await post("/api/message", { text, thread_key: state.chat || "direct" });
       state.justSent = true;
       await refreshChat();
     } catch (err) {
       input.value = text; autosize();
       alert("Could not send: " + err.message);
     } finally {
-      state.busy = false; autosize(); input.focus();
+      state.busy = false; autosize(); input.focus(); slashUpdate();
     }
   }
 
@@ -484,8 +537,11 @@
   const isLive = (c) => c.phase === "working" || c.phase === "waiting";
 
   const beat = (id) => (Array.from(String(id || "")).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 997, 7) % 50) / 10;
-  function slime({ badge = null, mood = "step", size = "md", still = false, id = "" } = {}) {
-    return `<span class="slime sl-${size} m-${mood}${still ? " still" : ""}" style="--blink:${beat(id)}s" aria-hidden="true">
+  // Each clone has its persona's color (rimuru/persona.py COLORS): pass its card as tint.
+  const tintOf = (t) => t && /^#[0-9A-Fa-f]{6}$/.test(t.color || "") && /^#[0-9A-Fa-f]{6}$/.test(t.edge || "")
+    ? `;--slime:${t.color};--slime-edge:${t.edge}` : "";
+  function slime({ badge = null, mood = "step", size = "md", still = false, id = "", tint = null } = {}) {
+    return `<span class="slime sl-${size} m-${mood}${still ? " still" : ""}" style="--blink:${beat(id)}s${tintOf(tint)}" aria-hidden="true">
       <svg class="sl-body"><use href="#mark-clone"/></svg>
       ${badge ? `<span class="sl-badge">${icon(badge)}</span>` : ""}
       <span class="sl-fx"><i></i><i></i><i></i></span>
@@ -511,7 +567,7 @@
     if (c.attempt > 1 && isLive(c)) chips.push(`<span class="chip">Picked up after a restart</span>`);
     const who = c.asked_by && c.asked_by !== "you" && !c.from_chat ? `Asked by ${esc(c.asked_by)}. ` : "";
     return `<button class="card ${c.phase}" data-worker="${esc(c.id)}">
-      ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c), id: c.id })}
+      ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c), id: c.id, tint: c })}
       <div>
         <div class="cname" title="${esc(c.name)} ${esc(c.persona_line)}">${esc(c.name)}<span> &middot; ${esc(c.persona)}</span></div>
         <div class="ctitle">${esc(c.title)}</div>
@@ -617,7 +673,7 @@
     if (sig === state.panelSig) return;
     state.panelSig = sig;
 
-    $("panel-slime").innerHTML = slime({ badge: BADGE[c.stage], mood: c.stage, size: "lg", still: !live });
+    $("panel-slime").innerHTML = slime({ badge: BADGE[c.stage], mood: c.stage, size: "lg", still: !live, id: c.id, tint: c });
     $("panel-title").textContent = `${c.name} · ${c.title}`;
     $("panel-sub").textContent = `${DOING[c.stage] || c.activity} \u00b7 ${ago(c.elapsed)}` +
       (c.asked_by && !c.from_chat ? ` \u00b7 asked by ${c.asked_by}` : "");
@@ -634,7 +690,7 @@
     // The job at a glance: four plain steps, each with its own little slime.
     parts.push(`<div class="stages">${d.stages.map((t) => `
       <div class="stage ${t.state}${t.bad ? " bad" : ""}">
-        ${slime({ badge: BADGE[t.key], size: "sm",
+        ${slime({ badge: BADGE[t.key], size: "sm", tint: c, id: c.id,
                   mood: t.state === "current" ? c.stage : t.state === "done" ? "done-tile" : t.state,
                   still: t.state !== "current" })}
         <div class="stage-label">${esc(t.label)}</div>
@@ -643,7 +699,7 @@
 
     const latest = d.timeline.length ? d.timeline[d.timeline.length - 1] : null;
     if (live) {
-      parts.push(`<div class="now">${slime({ badge: BADGE[c.stage], mood: c.stage, size: "xs" })}
+      parts.push(`<div class="now">${slime({ badge: BADGE[c.stage], mood: c.stage, size: "xs", id: c.id, tint: c })}
         <div><b>Right now:</b> ${esc(DOING[c.stage] || c.activity)}${latest
           ? `<div class="now-last">Last step: ${esc(latest.lines[latest.lines.length - 1])}</div>` : ""}</div></div>`);
     }
@@ -658,7 +714,7 @@
     const steps = d.timeline.slice().reverse().map((s, i) => {
       const moving = live && i === 0;
       return `<div class="step k-${esc(s.kind)}">
-        ${slime({ badge: BADGE[s.kind], mood: moving ? c.stage : "step", size: "xs", still: !moving })}
+        ${slime({ badge: BADGE[s.kind], mood: moving ? c.stage : "step", size: "xs", still: !moving, id: c.id, tint: c })}
         <div class="step-main">
           <div class="when">${clock(s.ts)}</div>
           ${s.lines.map((l) => `<div class="line">${esc(l)}</div>`).join("")}

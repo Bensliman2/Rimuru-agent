@@ -35,8 +35,11 @@
 
   // Each slime blinks on its own beat, taken from its ID.
   const beat = (id) => (Array.from(String(id || "")).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 997, 7) % 50) / 10;
-  function slime({ kind = "clone", badge = null, mood = "step", size = "md", still = false, id = "" } = {}) {
-    return `<span class="slime sl-${size} m-${mood}${still ? " still" : ""}" style="--blink:${beat(id)}s" aria-hidden="true">
+  // Each clone has its persona's color (rimuru/persona.py COLORS): pass its card as tint.
+  const tintOf = (t) => t && /^#[0-9A-Fa-f]{6}$/.test(t.color || "") && /^#[0-9A-Fa-f]{6}$/.test(t.edge || "")
+    ? `;--slime:${t.color};--slime-edge:${t.edge}` : "";
+  function slime({ kind = "clone", badge = null, mood = "step", size = "md", still = false, id = "", tint = null } = {}) {
+    return `<span class="slime sl-${size} m-${mood}${still ? " still" : ""}" style="--blink:${beat(id)}s${tintOf(tint)}" aria-hidden="true">
       <svg class="sl-body"><use href="#mark-${kind}"/></svg>
       ${badge ? `<span class="sl-badge">${icon(badge)}</span>` : ""}
       <span class="sl-fx"><i></i><i></i><i></i></span></span>`;
@@ -62,10 +65,10 @@
   const CHANNEL = { console: "Your chat", im: "Team chat", github: "GitHub" };
   const isLive = (c) => c.phase === "working" || c.phase === "waiting";
 
-  const VIEWS = ["overview", "rimuru", "clones", "watchdog", "messages", "memory", "practice"];
+  const VIEWS = ["overview", "guide", "rimuru", "clones", "watchdog", "messages", "memory", "practice"];
   const state = {
     view: "overview", overview: null, sessions: {}, cards: [], threads: [], turns: [],
-    events: [], answers: [], clone: null, dirty: true, feedsDirty: true, connected: false,
+    events: [], clone: null, dirty: true, feedsDirty: true, connected: false,
     rulesLoaded: false,
   };
 
@@ -109,7 +112,7 @@
     if (!o) return;
     renderStatus(o);
     renderTabs(o);
-    const render = { overview: renderOverview, rimuru: renderRimuru, clones: renderClones,
+    const render = { overview: renderOverview, guide: renderGuide, rimuru: renderRimuru, clones: renderClones,
       watchdog: renderWatchdog, messages: renderMessages, memory: renderMemory, practice: renderPractice };
     render[state.view](o);
   }
@@ -230,7 +233,7 @@
       ["Your messages cut in on its thinking", cutIns(o)],
       ["Older turns moved out of mind", o.router.spilled_turns ? `${o.router.spilled_turns} (still looked up by ID)` : "none yet"],
     ]));
-    showTranscript("rimuru-turns", "rtr_main");
+    showRimuruTurns();
   }
 
   // A cut-in abandons the answer Rimuru was writing. Its calls stream, so the
@@ -250,7 +253,7 @@
     }
     $("clones-count").textContent = cards.length ? `(${cards.length})` : "";
     const row = (c) => `<button class="clone-row${c.id === state.clone ? " on" : ""}" data-clone="${esc(c.id)}">
-        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c), id: c.id })}
+        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c), id: c.id, tint: c })}
         <span class="row-main"><span class="row-title"><b class="row-name">${esc(c.name)}</b> ${esc(c.title)}</span>
           <span class="row-sub">${esc(DOING[c.stage] || c.activity)} &middot; ${ago(c.elapsed)}${
             c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</span></span></button>`;
@@ -287,7 +290,7 @@
     }
     const model = (state.sessions[c.id] || {}).model || "";
     setHTML($("clone-head"), `<div class="who-head big">
-        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "lg", still: !isLive(c), id: c.id })}
+        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "lg", still: !isLive(c), id: c.id, tint: c })}
         <div><h2>${esc(c.name)} &middot; ${esc(c.title)}</h2>
           <p class="persona-line">${esc(c.persona)} - ${esc(c.persona_line)}</p>
           <p class="muted">${esc(DOING[c.stage] || c.activity)} &middot; ${ago(c.elapsed)}${model ? ` &middot; ${esc(model)}` : ""}${
@@ -326,18 +329,109 @@
       ["Checks so far", num(wd.ticks)],
       ["Times it stepped in", String(wd.interventions || "none")],
     ]));
-    setHTML($("wd-answers"), state.answers.map((a) => `<p>${linkIds(esc(a))}</p>`).join(""));
     showTranscript("wd-turns", "wdg_main");
   }
-  $("wd-form").addEventListener("submit", async (ev) => {
-    ev.preventDefault();
-    const q = $("wd-q").value.trim();
-    if (!q) return;
-    $("wd-q").value = "";
-    state.answers = [`You asked: “${q}” - the answer appears here in a moment.`, ...state.answers].slice(0, 3);
-    renderView();
-    try { await post("/api/watchdog/ask", { question: q }); } catch (err) { alert(err.message); }
+
+  /* ================================================================ guide */
+  // Ask about sessions and clones. Common questions are answered at once from the
+  // records; anything else by the AI, from the facts about what is picked.
+  const guide = { session: "", clone: "", log: [], busy: false, chats: [], chatsTs: 0, sig: "" };
+  try { guide.log = JSON.parse(sessionStorage.getItem("rimuru-guide") || "[]").filter((m) => !m.pending).slice(-30); }
+  catch { /* a private window: start empty */ }
+  const saveGuide = () => {
+    try { sessionStorage.setItem("rimuru-guide", JSON.stringify(guide.log.filter((m) => !m.pending).slice(-30))); }
+    catch { /* not kept, that is fine */ }
+  };
+  const fmt = (text) => {
+    const out = [];
+    let list = [];
+    const flush = () => { if (list.length) { out.push(`<ul>${list.join("")}</ul>`); list = []; } };
+    for (const line of String(text || "").split("\n")) {
+      if (/^\s*[-•*]\s+/.test(line)) list.push(`<li>${esc(line.replace(/^\s*[-•*]\s+/, ""))}</li>`);
+      else { flush(); if (line.trim()) out.push(`<p>${esc(line)}</p>`); }
+    }
+    flush();
+    return out.join("");
+  };
+
+  async function renderGuide() {
+    if (Date.now() - guide.chatsTs > 15000) {
+      try { guide.chats = (await api("/api/chats")).items; guide.chatsTs = Date.now(); } catch { /* restarting */ }
+    }
+    if (guide.session && !guide.chats.some((x) => x.key === guide.session)) guide.session = "";
+    const clones = state.cards.filter((c) => !guide.session || (c.session && c.session.key === guide.session));
+    if (guide.clone && !clones.some((c) => c.id === guide.clone)) guide.clone = "";
+    const sig = JSON.stringify([guide.chats.map((x) => [x.key, x.title]),
+      clones.map((c) => [c.id, c.name, c.title, c.phase]), guide.session, guide.clone]);
+    if (sig !== guide.sig) {
+      guide.sig = sig;
+      $("guide-session").innerHTML = '<option value="">All sessions</option>' + guide.chats.map((x) =>
+        `<option value="${esc(x.key)}"${x.key === guide.session ? " selected" : ""}>${esc(short(x.title, 60))}</option>`).join("");
+      $("guide-clone").innerHTML = `<option value="">${clones.length ? "Any clone" : "No clones yet"}</option>` +
+        clones.map((c) => `<option value="${esc(c.id)}"${c.id === guide.clone ? " selected" : ""}>${esc(c.name)} - ${
+          esc(short(c.title, 46))}${isLive(c) ? " (working)" : ""}</option>`).join("");
+      $("guide-clone").disabled = !clones.length;
+    }
+    const c = state.cards.find((x) => x.id === guide.clone);
+    const quick = c
+      ? [`What is ${c.name} doing?`,
+        c.phase === "failed" || c.phase === "stopped" || c.phase === "interrupted" ? `Why did ${c.name} stop?`
+          : c.phase === "done" ? `What did ${c.name} change?` : `Is ${c.name} stuck?`]
+      : ["How many clones are working?", "What is each clone doing?"].concat(guide.session ? ["How is this session going?"] : []);
+    setHTML($("guide-quick"), quick.map((q) => `<button class="chip" data-ask="${esc(q)}"><span class="t">${esc(q)}</span></button>`).join(""));
+    renderGuideLog();
+  }
+  function renderGuideLog() {
+    const box = $("guide-log");
+    setHTML(box, guide.log.length ? guide.log.map((m) => m.who === "you"
+      ? `<div class="g-msg you"><div class="g-bubble">${esc(m.text)}</div>${m.scope ? `<div class="g-meta">${esc(m.scope)}</div>` : ""}</div>`
+      : `<div class="g-msg guide${m.error ? " err" : ""}"><span class="g-icon">${icon("compass")}</span>
+          <div class="g-main"><div class="g-bubble">${m.pending ? '<span class="g-dots"><i></i><i></i><i></i></span>' : fmt(m.text)}</div>
+          <div class="g-meta">${m.pending ? "Looking…" : m.error ? "Not answered" : m.demo ? "Demo mode - no AI model set up"
+            : m.instant ? "From the records - no AI needed"
+            : `Answered by the AI${m.seconds ? ` in ${m.seconds}s` : ""}`}</div></div></div>`).join("")
+      : '<p class="muted g-empty">Ask a question, or tap one above.</p>');
+    box.scrollTop = box.scrollHeight;
+    $("guide-clear").hidden = !guide.log.length || guide.busy;
+    $("guide-send").disabled = guide.busy;
+  }
+  async function askGuide(question) {
+    question = String(question || "").trim();
+    if (!question || guide.busy) return;
+    const s = guide.chats.find((x) => x.key === guide.session);
+    const c = state.cards.find((x) => x.id === guide.clone);
+    const about = [s && `“${short(s.title, 40)}”`, c && c.name].filter(Boolean).join(", ");
+    const scope = about ? `About ${about}` : "";
+    const reply = { who: "guide", text: "", pending: true };
+    guide.log.push({ who: "you", text: question, scope }, reply);
+    guide.busy = true;
+    renderGuideLog();
+    try {
+      const r = await post("/api/guide", { question, session: guide.session, clone: guide.clone });
+      Object.assign(reply, { text: r.answer, instant: r.instant, seconds: r.seconds, error: !!r.error, demo: !!r.demo });
+    } catch (err) {
+      Object.assign(reply, { text: err.message, error: true });
+    }
+    reply.pending = false;
+    guide.busy = false;
+    guide.log = guide.log.slice(-30);
+    saveGuide();
+    renderGuideLog();
+  }
+  $("guide-session").addEventListener("change", (ev) => { guide.session = ev.target.value; guide.clone = ""; renderGuide(); });
+  $("guide-clone").addEventListener("change", (ev) => { guide.clone = ev.target.value; renderGuide(); });
+  $("guide-quick").addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-ask]");
+    if (b) askGuide(b.dataset.ask);
   });
+  $("guide-form").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const q = $("guide-q").value;
+    if (!q.trim() || guide.busy) return;
+    $("guide-q").value = "";
+    askGuide(q);
+  });
+  $("guide-clear").addEventListener("click", () => { guide.log = []; saveGuide(); renderGuideLog(); });
 
   /* ================================================================ messages */
   function renderMessages(o) { renderFlow(o, $("flow-big")); }
@@ -524,7 +618,7 @@
           g.folder ? ` &middot; files in <code>${esc(g.folder)}/</code>` : ""}${other ? "" : ` &middot; ${since(g.last_ts)}`}</div>
         </div>${other ? "" : `<a class="ghost small" href="/#chat=${encodeURIComponent(g.key)}">Open in the chat</a>`}</div>
       ${g.clones.map((c) => `<button class="mem-clone${c.id === pickedClone ? " on" : ""}" data-clone-detail="${esc(c.id)}">
-        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c), id: c.id })}
+        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c), id: c.id, tint: c })}
         <span class="row-main"><span class="row-title"><b class="row-name">${esc(c.name)}</b> ${esc(c.title)}</span>
           <span class="row-sub">${esc(outcome(c))}${c.files.length ? ` &middot; ${c.files.length} file${c.files.length === 1 ? "" : "s"}` : ""}${
             c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</span></span>
@@ -549,7 +643,7 @@
     const session = memory && [...memory.sessions, memory.other].find((g) => g.clones.some((x) => x.id === id));
     $("found-title").textContent = c.title;
     $("found").innerHTML = `
-      <div class="who-head">${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c), id: c.id })}
+      <div class="who-head">${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c), id: c.id, tint: c })}
         <div><p class="muted">${esc(outcome(c))}${session ? ` &middot; in “${esc(session.title)}”` : ""}</p></div></div>
       ${d.asked ? `<h3 class="mini">The job it was given</h3><div class="box">${esc(d.asked)}</div>` : ""}
       ${c.result ? `<h3 class="mini">What it reported</h3><div class="box">${esc(c.result)}</div>` : ""}
@@ -769,7 +863,62 @@
     box.innerHTML = parts.join("");
   }
 
-  function turnHtml(t, open) {
+  // Rimuru's turns, picked by the session they were about. A turn takes whatever
+  // arrived together, so one that handled two sessions shows under both.
+  const RT = TX["rimuru-turns"] = { sid: "rtr_main", session: "all", limit: 20, quick: "", open: new Set(),
+    total: 0, groups: [], reload: () => showRimuruTurns() };
+  async function showRimuruTurns() {
+    const meta = state.sessions.rtr_main || {};
+    const quick = [meta.step_count, meta.status, RT.session, RT.limit].join("|");
+    if (quick === RT.quick) return;
+    RT.quick = quick;
+    let d;
+    try { d = await api(`/api/rimuru/turns?session=${encodeURIComponent(RT.session)}&limit=${RT.limit}`); }
+    catch { RT.quick = ""; return; }
+    if (RT.quick !== quick) return;                    // picked another while loading
+    if (!d.groups.some((g) => g.key === RT.session)) {  // its turns are gone: back to all of them
+      RT.session = "all"; RT.quick = ""; RT.open.clear();
+      return showRimuruTurns();
+    }
+    RT.total = d.total;
+    RT.groups = d.groups;
+    setHTML($("turn-picker"), d.groups.length > 1 ? d.groups.map((g) =>
+      `<button class="chip${g.key === RT.session ? " on" : ""}${g.key === "other" ? " other" : ""}" data-turns="${esc(g.key)}"
+        aria-pressed="${g.key === RT.session}" title="${esc(g.title)}"><span class="t">${esc(g.title)}</span><span class="n">${num(g.count)}</span></button>`).join("") : "");
+    $("turns-clear").hidden = !d.total;
+    $("turns-clear").textContent = RT.session === "all" ? "Clear all turns" : "Clear these turns";
+    const steps = d.steps;
+    if (!RT.open.size) steps.slice(-1).forEach((x) => RT.open.add(x.id));
+    const about = RT.session === "all";
+    $("rimuru-turns").innerHTML = (steps.length
+      ? steps.slice().reverse().map((x) => turnHtml(x, RT.open, about ? x.about : null)).join("")
+      : `<p class="muted pad">${RT.session === "all" ? "No turns yet. Write to Rimuru in the chat." : "No turns about this."}</p>`) +
+      (d.total > steps.length ? `<button class="ghost more" data-more="rimuru-turns">Show ${Math.min(20, d.total - steps.length)} older turns</button>` : "");
+  }
+  $("turn-picker").addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-turns]");
+    if (!b || b.dataset.turns === RT.session) return;
+    Object.assign(RT, { session: b.dataset.turns, limit: 20, quick: "" });
+    RT.open.clear();
+    $("rimuru-turns").scrollTop = 0;
+    showRimuruTurns();
+  });
+  $("turns-clear").addEventListener("click", async () => {
+    const g = RT.groups.find((x) => x.key === RT.session) || {};
+    const n = RT.total;
+    const what = RT.session === "all" ? `all ${n} of Rimuru's turns`
+      : RT.session === "other" ? `the ${n} turn${n === 1 ? "" : "s"} not about a session`
+        : `the ${n} turn${n === 1 ? "" : "s"} about “${g.title}”`;
+    if (!confirm(`Clear ${what} from the log?\n\nRimuru keeps what it has in mind, and the chat stays. ` +
+      "To forget a session completely, delete the session.")) return;
+    try { await api(`/api/rimuru/turns?session=${encodeURIComponent(RT.session)}`, { method: "DELETE" }); }
+    catch (e) { alert(e.message); return; }
+    Object.assign(RT, { quick: "", limit: 20 });
+    RT.open.clear();
+    refresh();
+  });
+
+  function turnHtml(t, open, about = null) {
     const tools = (t.tool_calls || []).map((c, i) => {
       const res = (t.tool_results || [])[i];
       const args = Object.entries(c.args || {}).map(([k, v]) => `${k}: ${String(v).slice(0, 400)}`).join("\n");
@@ -784,6 +933,7 @@
         <span class="turn-meta">${clock(t.ts)} &middot; ${(t.latency_ms / 1000).toFixed(1)}s${
           t.batch_size > 1 ? ` &middot; ${t.batch_size} messages at once` : ""}${
           u.cache_read_tokens ? ` &middot; ${num(u.cache_read_tokens)} cached` : ""}</span>
+        ${(about || []).slice(0, 2).map((a) => `<span class="tag about" title="${esc(a)}">${esc(short(a, 26))}</span>`).join("")}
         ${t.error ? '<span class="tag bad">error</span>' : ""}</button>
       <div class="turn-body">
         ${block("What it was given", t.injected ? `<pre>${linkIds(esc(t.injected))}</pre>` : "")}
@@ -808,7 +958,7 @@
     const more = ev.target.closest("[data-more]");
     if (more) {
       const t = TX[more.dataset.more];
-      if (t) { t.limit += 20; showTranscript(more.dataset.more, t.sid); }
+      if (t) { t.limit += 20; t.reload ? t.reload() : showTranscript(more.dataset.more, t.sid); }
       return;
     }
     const go = ev.target.closest("[data-go]");
@@ -854,9 +1004,6 @@
     ws.onmessage = (ev) => {
       const e = JSON.parse(ev.data);
       if (e.topic === "_backlog") { state.events = e.events.slice(); state.feedsDirty = true; renderFeeds(); return; }
-      if (e.topic === "watchdog.answer") {
-        state.answers = [e.text, ...state.answers.filter((a) => !a.startsWith("You asked"))].slice(0, 3);
-      }
       state.events.push(e);
       if (state.events.length > 800) state.events.splice(0, state.events.length - 800);
       state.dirty = true;

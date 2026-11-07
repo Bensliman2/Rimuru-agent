@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 
+from .. import commands
 from ..ids import new_id
 from ..models import Trigger
 from .base import ChannelNorms
@@ -135,7 +136,11 @@ class TelegramChannel:
             if private:
                 await self.send(chat_id, "I can only read text messages for now.")
             return
-        if private:
+        if private and commands.parse(text) == "init":
+            # The same /init as in the app; other commands (/start) are just messages.
+            done = await self.system.run_command(f"tg-{chat_id}", text, channel="telegram")
+            await self.send(chat_id, done["said"])
+        elif private:
             await self.system.human_message(text, channel="telegram", thread_key=f"tg-{chat_id}",
                                             author=name)
         elif self.settings.tg.get("groups"):

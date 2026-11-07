@@ -429,10 +429,10 @@ svg { display: block; }
   color: var(--ok); background: var(--ok-soft);
   border-color: color-mix(in srgb, var(--ok) 40%, var(--border));
 }
-.m-failed .sl-body { filter: grayscale(.6); }
+.m-failed .sl-body { filter: saturate(.5); }
 .m-failed .sl-badge { color: var(--bad); background: var(--bad-soft);
                       border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
-.m-stopped .sl-body, .m-interrupted .sl-body { filter: grayscale(.85); opacity: .7; }
+.m-stopped .sl-body, .m-interrupted .sl-body { filter: saturate(.3); opacity: .75; }
 .m-stopped .sl-badge, .m-interrupted .sl-badge { color: var(--muted); }
 .m-todo .sl-body, .m-skipped .sl-body { opacity: .28; filter: grayscale(.4); }
 .m-todo .sl-badge, .m-skipped .sl-badge { color: var(--faint); background: var(--surface-2);
@@ -878,3 +878,23 @@ html { background: var(--bg); }
 /* ------------------------------------------------------------------ clones: a name and a persona */
 .cname { font-size: 12.5px; font-weight: 650; color: var(--accent-strong); }
 .cname span { font-weight: 500; color: var(--muted); }
+
+/* ------------------------------------------------------------------ "/" commands in the chat box */
+.composer { position: relative; }
+.slash-menu {
+  position: absolute; left: 16px; right: 72px; bottom: calc(100% - 8px); z-index: 30;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+.slash-item {
+  display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left;
+  padding: 8px 10px; border: 0; border-radius: 8px; background: none; cursor: pointer;
+}
+.slash-item b { font-family: var(--mono); font-size: 13px; color: var(--accent-strong); flex-shrink: 0; }
+.slash-item span { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.slash-item.on, .slash-item:hover { background: var(--accent-soft); }
+
+/* ------------------------------------------------------------------ a color per clone */
+/* Each clone's body takes its persona's color (rimuru/persona.py COLORS), set on
+   the slime as --slime and --slime-edge; a white sheen keeps it soft. */
+.sl-skin { fill: var(--slime, #A6DCF2); stroke: var(--slime-edge, #5DBDE6); stroke-width: 2; }

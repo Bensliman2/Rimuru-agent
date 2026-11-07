@@ -62,6 +62,14 @@ Then open **http://127.0.0.1:8800**.
   **Open** shows it in File Explorer. A whole drive, your whole home folder, the
   system's folders and Rimuru's own folder are refused, and clones are told never
   to delete files of yours they did not make.
+- **/init: a guide to your project.** In a session that works in your own project,
+  type `/init` (typing `/` shows the commands). A clone studies the folder and writes
+  `RIMURU.md` - what the project is, how it is organized, how to run and test it, its
+  conventions. From then on every clone that works there reads it first, the way
+  Claude Code reads `CLAUDE.md`; a folder with an `AGENTS.md` or `CLAUDE.md` of its own
+  works too. Run `/init` again to bring the guide up to date. It works from Telegram too.
+- **Every clone has a name, a persona and a color** - Mika the amber one, Dax the mint
+  one - and the clones working side by side never share a color.
 - **Rimuru remembers.** It keeps lasting facts by itself - about you, about each
   session's work - and uses them in later sessions without being asked; its clones get
   them too. A small line in the chat shows each one as it is kept, and Under the hood ->
@@ -144,9 +152,10 @@ the same plain language as the chat - one view at a time:
 | View | What you see |
 |---|---|
 | Overview | Rimuru, the clones and the watchdog at a glance; what came in; the latest events; models and cost |
-| Rimuru | what it is doing, what it decided and said, and its thoughts turn by turn |
+| Guide | ask about your sessions and clones in plain words - how many are working, what each one is doing, why one stopped. Pick a session or a clone to narrow it down. Common questions are answered at once from the records, with no AI call; anything else by the watchdog's model, from what it can see |
+| Rimuru | what it is doing, what it decided and said, and its thoughts turn by turn - all of them, or only those about one session (a turn that handled two sessions shows under both). **Clear** clears turns from this log only: Rimuru keeps what it has in mind and the chat stays; to forget a session completely, delete the session |
 | Clones | every clone with its little slime, grouped by session; pick one to see its job, its commands and every turn |
-| Watchdog | its checks and interventions, its notes - and a box to ask it why something failed |
+| Watchdog | its checks and interventions, and its notes - a quiet supervisor; questions go to the Guide |
 | Messages | what happened to every incoming message, and the rules for group chats, editable in plain words |
 | Memory | find anything by typing a word or two - a session, a job, a message - and everything Rimuru remembers, to change or forget |
 | Practice runs | scripted workloads - a busy team chat, a burst, a quiet day, two coding exercises |
@@ -285,6 +294,8 @@ rimuru/
   safety.py      finding hidden instructions aimed at AI tools
   connections.py who may give Rimuru work on Telegram and GitHub
   folders.py     picking a session's folder, safely
+  guide.py       the Guide: questions about sessions and clones
+  commands.py    commands typed in the chat: /init, and the project guide clones read
 config/          models.toml - your models (made by the Models button), and an example
 data/            your own data, never committed:
   rimuru.db        everything Rimuru remembers - chats, jobs, every step
@@ -295,6 +306,6 @@ data/            your own data, never committed:
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           93 automated checks
+tests/           106 automated checks
 run.py           serve | bench | verify | trace | eval | speed | hands
 ```

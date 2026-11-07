@@ -22,9 +22,10 @@
       <stop offset="0.55" stop-color="#6CC9EC"/>
       <stop offset="1" stop-color="#2E8FC7"/>
     </linearGradient>
-    <linearGradient id="clone-body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#DDF4FB"/>
-      <stop offset="1" stop-color="#93D6F0"/>
+    <linearGradient id="clone-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.62"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#0B2A3D" stop-opacity="0.07"/>
     </linearGradient>
     <radialGradient id="slime-core" cx="0.5" cy="0.5" r="0.5">
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.85"/>
@@ -42,30 +43,31 @@
     <circle cx="35.5" cy="42" r="8.5" fill="url(#slime-core)" opacity="0.7"/>
       <g class="sl-eyes">
       <g class="sl-look"><g class="sl-open">
-        <ellipse cx="25" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
-        <ellipse cx="39" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
-        <circle cx="25.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
-        <circle cx="39.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
+        <ellipse cx="25" cy="38" rx="2.95" ry="4.2" fill="#0B2A3D"/>
+        <ellipse cx="39" cy="38" rx="2.95" ry="4.2" fill="#0B2A3D"/>
+        <circle cx="26.15" cy="36.2" r="1.15" fill="#FFFFFF"/>
+        <circle cx="40.15" cy="36.2" r="1.15" fill="#FFFFFF"/>
       </g></g>
-      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.7" stroke-linecap="round">
-        <path d="M22.4 38.6 Q25 35.9 27.6 38.6"/><path d="M36.4 38.6 Q39 35.9 41.6 38.6"/>
+      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.9" stroke-linecap="round">
+        <path d="M21.9 38.9 Q25 35.5 28.1 38.9"/><path d="M35.9 38.9 Q39 35.5 42.1 38.9"/>
       </g>
     </g>
   </symbol>
   <symbol id="mark-clone" viewBox="0 0 64 64">
     <ellipse cx="32" cy="58.5" rx="18" ry="2.4" fill="#0B2A3D" opacity="0.08"/>
-    <use href="#slime-shape" fill="url(#clone-body)" stroke="#5DBDE6" stroke-width="2"/>
+    <use href="#slime-shape" class="sl-skin"/>
+    <use href="#slime-shape" fill="url(#clone-sheen)"/>
     <ellipse cx="21" cy="32.5" rx="3.4" ry="6" fill="#FFFFFF" opacity="0.6"
              transform="rotate(-32 21 32.5)"/>
       <g class="sl-eyes">
       <g class="sl-look"><g class="sl-open">
-        <ellipse cx="25" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
-        <ellipse cx="39" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
-        <circle cx="25.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
-        <circle cx="39.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
+        <ellipse cx="25" cy="38" rx="2.95" ry="4.2" fill="#0B2A3D"/>
+        <ellipse cx="39" cy="38" rx="2.95" ry="4.2" fill="#0B2A3D"/>
+        <circle cx="26.15" cy="36.2" r="1.15" fill="#FFFFFF"/>
+        <circle cx="40.15" cy="36.2" r="1.15" fill="#FFFFFF"/>
       </g></g>
-      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.7" stroke-linecap="round">
-        <path d="M22.4 38.6 Q25 35.9 27.6 38.6"/><path d="M36.4 38.6 Q39 35.9 41.6 38.6"/>
+      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.9" stroke-linecap="round">
+        <path d="M21.9 38.9 Q25 35.5 28.1 38.9"/><path d="M35.9 38.9 Q39 35.5 42.1 38.9"/>
       </g>
     </g>
   </symbol>
@@ -170,6 +172,7 @@
     </div>
 
     <form class="composer" id="composer" autocomplete="off">
+      <div class="slash-menu" id="slash-menu" role="listbox" aria-label="Commands" hidden></div>
       <textarea id="input" rows="1" placeholder="Ask Rimuru to build, fix or explain something&hellip;"
                 aria-label="Message Rimuru"></textarea>
       <button type="submit" class="send" id="send" aria-label="Send" disabled>

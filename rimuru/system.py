@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import Any
 
@@ -30,11 +31,12 @@ from .config import CONFIG, Config
 from .ids import new_id
 from .llm import build_client, catalog
 from .llm.base import Msg
-from .models import TERMINAL, Trigger
+from .models import TERMINAL, Task, Trigger
 from .recall import describe_graph
 from .connections import Connections
 from .hands.hub import HandsHub
 from .safety import notice_for_person
+from . import commands, sessions as chats
 from .sessions import title_from, title_of
 from .router.filtering import EventFilter
 from .router.routing import EventRouter
@@ -372,6 +374,27 @@ class RimuruSystem:
         self.bus.emit("chat.deleted", key=key)
         return {"ok": True, "folder_deleted": folder, **counts}
 
+    def rimurus_turns(self) -> list[tuple[Any, set[str]]]:
+        """Each of Rimuru's turns, with the chat sessions it was about.
+
+        A turn begins with the events Rimuru was given (batch_size >= 1); the steps
+        after it, reading tool results, belong to the same turn - under the session
+        they name, or the turn's when they name none. One turn can be about several
+        sessions (it handles whatever arrived together), and some about none - a
+        clone's progress, the watchdog, a team chat."""
+        conv = self.config.conversation_channels
+        keys = {t.id: t.key for t in self.store.threads.values() if t.channel in conv}
+        named = {f"{t.channel} {t.key}": t.key for t in self.store.threads.values() if t.channel in conv}
+        out, current = [], set()
+        for step in self.store.transcript(self.router.session.id):
+            blob = step.injected + json.dumps(step.tool_calls)
+            found = {keys[t] for t in re.findall(r"thr_[0-9a-f]+", blob) if t in keys}
+            found |= {named[m] for m in re.findall(r"(?:console|telegram) [A-Za-z0-9_-]+", blob) if m in named}
+            if step.batch_size >= 1:
+                current = found
+            out.append((step, set(found or current)))
+        return out
+
     def _forget_in_rimurus_turns(self, marks: tuple[str, ...]) -> None:
         """Its record of turns (Under the hood -> Rimuru) too: each turn about the
         deleted session, from the event that began it to its last step."""
@@ -605,6 +628,59 @@ class RimuruSystem:
             self.store.add_chat("user", text, trigger_id=trigger.id, chat=thread_key)
         await self.ingest(trigger)
         return trigger
+
+    # ------------------------------------------------------------------ #
+    # commands typed in the chat (rimuru/commands.py)
+    # ------------------------------------------------------------------ #
+    async def run_command(self, key: str, text: str, *, channel: str | None = None) -> dict[str, Any]:
+        """A command typed in a session's chat, like /init. It shows in the chat as
+        the person typed it, with the answer under it - and costs no call to Rimuru:
+        the clone's report reaches Rimuru when it is done, like any job's."""
+        channel = channel or ("telegram" if key.startswith("tg-") else "console")
+        thread_id = self.store.thread_by_key.get(f"{channel}:{key}")
+        thread = self.store.threads.get(thread_id or "") or self.store.get_or_create_thread(
+            channel, key, chats.UNNAMED)
+        name = commands.parse(text) or ""
+        self.store.add_chat("user", text.strip(), chat=key, command=name)
+        if name == "init":
+            ok, said, clone = await self._command_init(thread)
+        else:
+            ok, said, clone = False, (f"There is no /{name} command. Try /init - it studies this "
+                                      f"session's folder and writes RIMURU.md, a guide every clone "
+                                      f"reads first."), ""
+        self.store.add_chat("rimuru", said, chat=key, notice="command")
+        self.bus.emit("command.ran", command=name, ok=ok, thread_id=thread.id, clone=clone)
+        return {"ok": ok, "said": said, "clone": clone}
+
+    async def _command_init(self, thread: Any) -> tuple[bool, str, str]:
+        kind = chats.folder_kind(thread)
+        folder = chats.folder_for(self.config, thread)
+        if kind == "new":
+            return False, ("This session has no folder yet. Pick your project's folder with Change, "
+                           "at the top of the chat, then type /init again."), ""
+        if kind != "remote" and (not folder.is_dir() or not any(folder.iterdir())):
+            return False, (f"{chats.display(folder)} is empty, so there is nothing to study yet. Pick "
+                           f"your project's folder with Change, or ask me to build something first."), ""
+        if any(t.thread_id == thread.id and t.title == commands.INIT_TITLE
+               and t.status in {"running", "queued"} for t in self.store.tasks.values()):
+            return False, "A clone is already writing RIMURU.md for this session.", ""
+        if thread.title in {"", chats.UNNAMED}:
+            # Its first job names a session; a guide is not much of a name.
+            thread.title = folder.name if kind != "remote" else "A project on another machine"
+            self.store.put_thread(thread)
+        task = self.store.put_task(Task(id=new_id("task"), title=commands.INIT_TITLE,
+                                        brief=commands.INIT_BRIEF, thread_id=thread.id))
+        try:
+            worker, started = await self.pool.submit(task, thread_id=thread.id)
+        except Exception as exc:  # noqa: BLE001 - e.g. the other machine is offline
+            self.store.update_task(task, status="failed", finished_ts=time.time(),
+                                   result=f"could not start: {exc}")
+            return False, f"I could not start a clone for it: {exc}", ""
+        where = "the project's folder on the other machine" if kind == "remote" else chats.display(folder)
+        later = "" if started else " All clones are busy, so it starts as soon as one is free."
+        return True, (f"{worker.name} is reading {where} to write RIMURU.md: what the project is, how "
+                      f"it is organized, how to run and test it, and its conventions. From now on every "
+                      f"clone that works here reads it first.{later}"), worker.name or ""
 
     # ------------------------------------------------------------------ #
     def start_scenario(self, name: str = "team", *, speed: float | None = None,

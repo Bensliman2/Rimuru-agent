@@ -39,16 +39,32 @@ PERSONAS: dict[str, tuple[str, str, str]] = {
 }
 
 
+# Each persona has its own color - the clone's body and a deeper edge - so the
+# clones at work tell apart at a glance: Mika the amber one, Dax the mint one.
+COLORS: dict[str, tuple[str, str]] = {
+    "steady": ("#9BD3F2", "#4FA8DC"),      # sky
+    "quick": ("#FFD08A", "#E3A03A"),       # amber
+    "tidy": ("#A8E6CF", "#4DBB8F"),        # mint
+    "curious": ("#C9B8F5", "#8C6FE0"),     # lavender
+    "calm": ("#8FDCD6", "#3BAFA6"),        # teal
+    "practical": ("#E9D3A8", "#C2A061"),   # sand
+    "bright": ("#FFB4A2", "#EE7D63"),      # coral
+    "precise": ("#AFC0F7", "#5F78DB"),     # indigo
+}
+
+
 def _number(text: str) -> int:
     return int(hashlib.sha256(text.encode()).hexdigest(), 16)
 
 
-def pick(session_id: str, taken: Iterable[str] = ()) -> tuple[str, str]:
-    """A name no clone at work has, and a persona - (name, persona key)."""
+def pick(session_id: str, taken: Iterable[str] = (), taken_personas: Iterable[str] = ()) -> tuple[str, str]:
+    """A name no clone at work has, and a persona - (name, persona key). The
+    persona is one no clone at work has too, while there are any left, so the
+    clones working side by side differ in color as well as in name."""
     n = _number(session_id)
-    busy = set(taken)
+    busy, busy_personas = set(taken), set(taken_personas)
     names = [name for name in NAMES if name not in busy] or NAMES
-    keys = list(PERSONAS)
+    keys = [key for key in PERSONAS if key not in busy_personas] or list(PERSONAS)
     return names[n % len(names)], keys[(n // 97) % len(keys)]
 
 
@@ -64,7 +80,8 @@ def of(session: Any) -> tuple[str, str]:
 def card(session: Any) -> dict[str, str]:
     name, key = of(session)
     label, line, _voice = PERSONAS[key]
-    return {"name": name, "persona": label, "persona_line": line}
+    color, edge = COLORS[key]
+    return {"name": name, "persona": label, "persona_line": line, "color": color, "edge": edge}
 
 
 def introduction(session: Any) -> str:

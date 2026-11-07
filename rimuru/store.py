@@ -346,6 +346,17 @@ class Store:
     # ------------------------------------------------------------------ #
     # steps
     # ------------------------------------------------------------------ #
+    def delete_steps(self, session_id: str, ids: set[str]) -> int:
+        """Clear turns from a session's log (Under the hood -> Rimuru -> Clear)."""
+        kept = [s for s in self.steps.get(session_id, []) if s.id not in ids]
+        gone = len(self.steps.get(session_id, [])) - len(kept)
+        self.steps[session_id] = kept
+        self._delete("steps", "id", sorted(ids))
+        if (session := self.sessions.get(session_id)) is not None:
+            session.step_count = len(kept)
+            self._persist_session(session)
+        return gone
+
     def save_step(self, step: Step) -> None:
         """Rewrite a step already recorded (deleting a session scrubs Rimuru's turns)."""
         self._write(

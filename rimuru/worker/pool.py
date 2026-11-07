@@ -16,7 +16,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from .. import memory, persona
+from .. import commands, memory, persona
 from ..context import inline_trigger
 from ..ids import new_id
 from ..llm import build_client
@@ -24,6 +24,8 @@ from ..models import TERMINAL, Session, Task
 from ..hands import remote
 from ..hands.remote import RemoteFiles, RemoteShell
 from ..sessions import claim_folder, is_session, name_session
+from ..safety import hidden_instructions
+from .files import LocalFiles
 from .session import WorkerAgent
 
 
@@ -101,8 +103,9 @@ class WorkerPool:
         else:
             session_id = new_id("worker")
             # A name no clone at work has, and a persona (rimuru/persona.py).
-            name, character = persona.pick(session_id, (w.session.name for w in self.workers.values()
-                                                        if w.session.status not in TERMINAL))
+            at_work = [w.session for w in self.workers.values() if w.session.status not in TERMINAL]
+            name, character = persona.pick(session_id, (w.name for w in at_work),
+                                           (w.persona for w in at_work))
             session = self.store.put_session(Session(
                 id=session_id,
                 kind="worker",
@@ -140,6 +143,15 @@ class WorkerPool:
             if not info.get("docker") and info.get("host_commands"):
                 shell.kind = "host"
             where = f"{self.hands.name(machine_id)}:{root}"
+        # The project's own guide (RIMURU.md from /init, or AGENTS.md / CLAUDE.md):
+        # read first, so a fresh clone knows how the project works. A resumed
+        # clone already has it in its conversation.
+        guide = ""
+        if restore is None:
+            found = await commands.project_guide(files or LocalFiles(root))
+            if found is not None:
+                name, text = found
+                guide = commands.guide_for_brief(name, text, bool(hidden_instructions(text)))
         worker = WorkerAgent(
             task=task,
             session=session,
@@ -161,6 +173,7 @@ class WorkerPool:
                                       thread.key if is_session(thread, self.config) else ""),
             files=files,
             where=where,
+            guide=guide,
         )
         self.workers[session.id] = worker
         self.store.update_task(task, worker_id=session.id, status="queued")

@@ -150,6 +150,7 @@ class WorkerAgent:
         memories: str = "",
         files: Any = None,
         where: str | None = None,
+        guide: str = "",
     ) -> None:
         self.task = task
         if files is not None:
@@ -239,6 +240,8 @@ class WorkerAgent:
                 "rather than starting over, and never delete or rename a file you did not "
                 "create unless they asked for exactly that.\n\n"
             )
+        if guide:
+            brief += guide
         if memories:
             brief += memories.rstrip() + "\n\n"
         if resume_note:

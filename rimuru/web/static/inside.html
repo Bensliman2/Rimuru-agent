@@ -22,9 +22,10 @@
       <stop offset="0.55" stop-color="#6CC9EC"/>
       <stop offset="1" stop-color="#2E8FC7"/>
     </linearGradient>
-    <linearGradient id="clone-body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#DDF4FB"/>
-      <stop offset="1" stop-color="#93D6F0"/>
+    <linearGradient id="clone-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.62"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#0B2A3D" stop-opacity="0.07"/>
     </linearGradient>
     <radialGradient id="slime-core" cx="0.5" cy="0.5" r="0.5">
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.85"/>
@@ -41,29 +42,30 @@
     <circle cx="35.5" cy="42" r="8.5" fill="url(#slime-core)" opacity="0.7"/>
       <g class="sl-eyes">
       <g class="sl-look"><g class="sl-open">
-        <ellipse cx="25" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
-        <ellipse cx="39" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
-        <circle cx="25.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
-        <circle cx="39.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
+        <ellipse cx="25" cy="38" rx="2.95" ry="4.2" fill="#0B2A3D"/>
+        <ellipse cx="39" cy="38" rx="2.95" ry="4.2" fill="#0B2A3D"/>
+        <circle cx="26.15" cy="36.2" r="1.15" fill="#FFFFFF"/>
+        <circle cx="40.15" cy="36.2" r="1.15" fill="#FFFFFF"/>
       </g></g>
-      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.7" stroke-linecap="round">
-        <path d="M22.4 38.6 Q25 35.9 27.6 38.6"/><path d="M36.4 38.6 Q39 35.9 41.6 38.6"/>
+      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.9" stroke-linecap="round">
+        <path d="M21.9 38.9 Q25 35.5 28.1 38.9"/><path d="M35.9 38.9 Q39 35.5 42.1 38.9"/>
       </g>
     </g>
   </symbol>
   <symbol id="mark-clone" viewBox="0 0 64 64">
     <ellipse cx="32" cy="58.5" rx="18" ry="2.4" fill="#0B2A3D" opacity="0.08"/>
-    <use href="#slime-shape" fill="url(#clone-body)" stroke="#5DBDE6" stroke-width="2"/>
+    <use href="#slime-shape" class="sl-skin"/>
+    <use href="#slime-shape" fill="url(#clone-sheen)"/>
     <ellipse cx="21" cy="32.5" rx="3.4" ry="6" fill="#FFFFFF" opacity="0.6" transform="rotate(-32 21 32.5)"/>
       <g class="sl-eyes">
       <g class="sl-look"><g class="sl-open">
-        <ellipse cx="25" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
-        <ellipse cx="39" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
-        <circle cx="25.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
-        <circle cx="39.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
+        <ellipse cx="25" cy="38" rx="2.95" ry="4.2" fill="#0B2A3D"/>
+        <ellipse cx="39" cy="38" rx="2.95" ry="4.2" fill="#0B2A3D"/>
+        <circle cx="26.15" cy="36.2" r="1.15" fill="#FFFFFF"/>
+        <circle cx="40.15" cy="36.2" r="1.15" fill="#FFFFFF"/>
       </g></g>
-      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.7" stroke-linecap="round">
-        <path d="M22.4 38.6 Q25 35.9 27.6 38.6"/><path d="M36.4 38.6 Q39 35.9 41.6 38.6"/>
+      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.9" stroke-linecap="round">
+        <path d="M21.9 38.9 Q25 35.5 28.1 38.9"/><path d="M35.9 38.9 Q39 35.5 42.1 38.9"/>
       </g>
     </g>
   </symbol>
@@ -88,6 +90,8 @@
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z" fill="currentColor"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5zM5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
   <symbol id="i-route" viewBox="0 0 24 24"><path d="M5 6h7a4 4 0 0 1 0 8H9a3 3 0 0 0 0 6h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="5" cy="6" r="2" fill="currentColor"/><path d="M17 17l2.5 3-2.5 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15.6 8.4l-2.1 5.1-5.1 2.1 2.1-5.1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h12M12.5 6.5L18 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="13" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="13" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
 </svg>
 
@@ -117,6 +121,7 @@
 <div class="views-bar">
   <nav class="views" id="views" role="tablist" aria-label="Views">
     <button role="tab" data-view="overview" class="on"><svg><use href="#i-grid"/></svg>Overview</button>
+    <button role="tab" data-view="guide"><svg><use href="#i-compass"/></svg>Guide</button>
     <button role="tab" data-view="rimuru"><svg class="tab-mark"><use href="#mark-rimuru"/></svg>Rimuru</button>
     <button role="tab" data-view="clones"><svg class="tab-mark"><use href="#mark-clone"/></svg>Clones<span class="tab-badge" id="badge-clones" hidden></span></button>
     <button role="tab" data-view="watchdog"><svg><use href="#i-eye"/></svg>Watchdog</button>
@@ -156,6 +161,30 @@
     </div>
   </section>
 
+  <!-- GUIDE -->
+  <section class="view" id="view-guide" role="tabpanel">
+    <section class="block guide">
+      <div class="who-head big">
+        <span class="who-icon"><svg><use href="#i-compass"/></svg></span>
+        <div><h2>Guide</h2><p class="muted">Ask about your sessions and clones in plain words: how
+          many are working, what each one is doing, why one stopped. Pick a session or a clone to
+          ask about just that one. Common questions are answered at once from the records; anything
+          else is answered by the watchdog's AI, from what it can see.</p></div>
+      </div>
+      <div class="guide-pick">
+        <label><span>Session</span><select id="guide-session" aria-label="Session to ask about"></select></label>
+        <label><span>Clone</span><select id="guide-clone" aria-label="Clone to ask about"></select></label>
+      </div>
+      <div class="chips guide-quick" id="guide-quick" aria-label="Quick questions"></div>
+      <div class="guide-log" id="guide-log" aria-live="polite"></div>
+      <form class="guide-ask" id="guide-form" autocomplete="off">
+        <input id="guide-q" maxlength="800" placeholder="Ask anything, for example: why did it stop?" aria-label="Your question">
+        <button class="primary" type="submit" id="guide-send"><svg><use href="#i-send"/></svg><span>Ask</span></button>
+      </form>
+      <div class="guide-foot"><button class="link small" id="guide-clear" hidden>Clear this conversation</button></div>
+    </section>
+  </section>
+
   <!-- RIMURU -->
   <section class="view" id="view-rimuru" role="tabpanel">
     <div class="split">
@@ -175,10 +204,14 @@
       </div>
       <section class="block col-wide">
         <div class="block-head"><h2>Its thoughts, turn by turn</h2>
-          <span class="hint-icon" tabindex="0" aria-label="About turns"><svg><use href="#i-info"/></svg>
+          <span class="hint-icon inline" tabindex="0" aria-label="About turns"><svg><use href="#i-info"/></svg>
             <span class="tip">Each turn is one call to the AI: what Rimuru was given (your
-              messages, reports from clones), how it reasoned, and what it did. Newest first.</span></span>
+              messages, reports from clones), how it reasoned, and what it did. Pick a session
+              to see only the turns about it - a turn that handled two sessions at once shows
+              under both. Newest first.</span></span>
+          <button class="ghost small danger" id="turns-clear" hidden>Clear these turns</button>
         </div>
+        <div class="chips" id="turn-picker" aria-label="Show the turns about"></div>
         <div class="scroll" id="rimuru-turns"></div>
       </section>
     </div>
@@ -221,11 +254,9 @@
               running it rests and costs nothing.</p></div>
           </div>
           <dl class="facts" id="wd-facts"></dl>
-          <form class="ask" id="wd-form">
-            <input id="wd-q" placeholder="Ask it, e.g. why did a job fail?" aria-label="Question for the watchdog">
-            <button class="ghost" type="submit">Ask</button>
-          </form>
-          <div class="wd-answers" id="wd-answers"></div>
+          <p class="wd-guide">Questions about your clones - how many are working, why one
+            stopped? <button class="link" data-go="guide">Ask the Guide</button>. It reads what
+            the watchdog noticed too.</p>
         </section>
         <section class="block">
           <div class="block-head"><h2>What it did</h2></div>

@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from ..config import CONFIG, ROOT
 from ..llm import catalog
 from ..recall import recall as do_recall
+from .. import commands
 from .. import connections as conn
 from .. import folders
 from ..hands import remote
@@ -34,6 +35,7 @@ from .. import persona
 from .. import sessions as chats
 from ..ids import new_id
 from ..models import Memory
+from ..guide import Guide
 from ..system import RimuruSystem
 from . import friendly
 
@@ -71,6 +73,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
 
     app = FastAPI(title="Rimuru Super-agent", docs_url="/api/docs", lifespan=lifespan)
     app.state.system = system
+    guide = Guide(system)
 
     # The app stores API keys and can point models at any server, so it answers
     # only this computer: no other website may drive it (cross-site requests),
@@ -230,8 +233,10 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             if not in_session(task, chat):
                 continue
             clone = store.sessions.get(task.worker_id or "")
+            look = persona.card(clone) if clone else {}
             base = {"role": "event", "task_id": task.id, "worker_id": task.worker_id,
-                    "title": task.title, "clone": persona.of(clone)[0] if clone else ""}
+                    "title": task.title, "clone": look.get("name", ""),
+                    "color": look.get("color"), "edge": look.get("edge")}
             items.append({**base, "kind": "started", "ts": task.created_ts})
             if task.finished_ts and task.status in {"done", "failed", "cancelled"}:
                 items.append({**base, "kind": task.status, "ts": task.finished_ts})
@@ -601,6 +606,49 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         )
         return {"items": items}
 
+    # ------------------------------------------------------------------ #
+    # Rimuru's turns, by session - and clearing them from the log
+    # ------------------------------------------------------------------ #
+    def picked_turns(session: str) -> tuple[list, list]:
+        turns = system.rimurus_turns()
+        picked = [(s, keys) for s, keys in turns
+                  if session == "all" or (session == "other" and not keys) or session in keys]
+        return turns, picked
+
+    @app.get("/api/rimuru/turns")
+    async def rimuru_turns(session: str = "all", limit: int = 20) -> dict[str, Any]:
+        """Each turn under the session(s) it was about; "other" for the ones about
+        no session (a clone's progress, the watchdog, team chats)."""
+        turns, picked = picked_turns(session)
+        latest: dict[str, float] = {}
+        counts: dict[str, int] = {}
+        other = 0
+        for step, keys in turns:
+            other += not keys
+            for key in keys:
+                counts[key] = counts.get(key, 0) + 1
+                latest[key] = step.ts
+        titles: dict[str, str] = {}
+        for key in counts:
+            thread = session_thread(key)
+            titles[key] = chats.title_of(system.store, thread) if thread else key
+        groups = [{"key": "all", "title": "All", "count": len(turns)}]
+        groups += [{"key": key, "title": titles[key], "count": counts[key]}
+                   for key in sorted(counts, key=lambda k: -latest[k])]
+        if other:
+            groups.append({"key": "other", "title": "Not about a session", "count": other})
+        shown = picked[-max(1, min(limit, 500)):]
+        return {"groups": groups, "total": len(picked),
+                "steps": [{**s.to_dict(), "about": sorted(titles[k] for k in keys)} for s, keys in shown]}
+
+    @app.delete("/api/rimuru/turns")
+    async def clear_rimuru_turns(session: str = "all") -> dict[str, Any]:
+        """Clear turns from the log. Rimuru keeps what it has in mind, and the chat
+        stays: to forget a session completely, delete the session."""
+        _turns, picked = picked_turns(session)
+        cleared = system.store.delete_steps(system.router.session.id, {s.id for s, _keys in picked})
+        return {"ok": True, "cleared": cleared}
+
     @app.get("/api/sessions/{session_id}")
     async def session_detail(session_id: str) -> dict[str, Any]:
         session = system.store.sessions.get(session_id)
@@ -862,6 +910,37 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             thread_key=key,
         )
         return {"ok": True, "trigger_id": trigger.id}
+
+    @app.get("/api/commands")
+    async def list_commands() -> dict[str, Any]:
+        """What can be typed after "/" in the chat."""
+        return {"items": commands.COMMANDS}
+
+    @app.post("/api/command")
+    async def run_command(payload: dict[str, Any]) -> dict[str, Any]:
+        """A command typed in a session's chat, like /init (rimuru/commands.py)."""
+        key = session_key(payload.get("chat"))
+        text = str(payload.get("text") or "").strip()
+        if commands.parse(text) is None:
+            raise HTTPException(400, "That is not a command. Commands look like /init.")
+        return await system.run_command(key, text, channel=channel_of(key))
+
+    @app.post("/api/guide")
+    async def ask_guide(payload: dict[str, Any]) -> dict[str, Any]:
+        """Under the hood -> Guide: a question about a session and/or a clone."""
+        session = str(payload.get("session") or "").strip() or None
+        clone = str(payload.get("clone") or "").strip() or None
+        if session and session_thread(session) is None:
+            raise HTTPException(404, "That session is gone.")
+        worker = system.store.sessions.get(clone or "")
+        if clone and (worker is None or worker.kind != "worker"):
+            raise HTTPException(404, "That clone is gone.")
+        try:
+            return await guide.answer(payload.get("question"), session, clone)
+        except Exception as exc:                        # the AI service refused or failed
+            return {"answer": "I could not reach the AI just now, so I cannot answer that one "
+                              f"({friendly.plain(str(exc))[:160]}). The quick questions still work.",
+                    "instant": False, "error": True}
 
     @app.post("/api/watchdog/ask")
     async def watchdog_ask(payload: dict[str, Any]) -> dict[str, Any]:

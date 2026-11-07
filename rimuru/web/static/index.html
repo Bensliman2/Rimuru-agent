@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<script type="speculationrules">
+  {"prerender": [{"where": {"or": [{"href_matches": "/inside"}, {"href_matches": "/inside#*"}]}, "eagerness": "moderate"}]}
+</script>
 <title>Rimuru</title>
 <link rel="icon" type="image/svg+xml" href="/static/rimuru.svg">
 <link rel="stylesheet" href="/static/app.css">
@@ -36,12 +40,34 @@
     <ellipse cx="21" cy="32.5" rx="4" ry="6.8" fill="#FFFFFF" opacity="0.55"
              transform="rotate(-32 21 32.5)"/>
     <circle cx="35.5" cy="42" r="8.5" fill="url(#slime-core)" opacity="0.7"/>
+      <g class="sl-eyes">
+      <g class="sl-look"><g class="sl-open">
+        <ellipse cx="25" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
+        <ellipse cx="39" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
+        <circle cx="25.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
+        <circle cx="39.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
+      </g></g>
+      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.7" stroke-linecap="round">
+        <path d="M22.4 38.6 Q25 35.9 27.6 38.6"/><path d="M36.4 38.6 Q39 35.9 41.6 38.6"/>
+      </g>
+    </g>
   </symbol>
   <symbol id="mark-clone" viewBox="0 0 64 64">
     <ellipse cx="32" cy="58.5" rx="18" ry="2.4" fill="#0B2A3D" opacity="0.08"/>
     <use href="#slime-shape" fill="url(#clone-body)" stroke="#5DBDE6" stroke-width="2"/>
     <ellipse cx="21" cy="32.5" rx="3.4" ry="6" fill="#FFFFFF" opacity="0.6"
              transform="rotate(-32 21 32.5)"/>
+      <g class="sl-eyes">
+      <g class="sl-look"><g class="sl-open">
+        <ellipse cx="25" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
+        <ellipse cx="39" cy="38" rx="2.5" ry="3.6" fill="#0B2A3D"/>
+        <circle cx="25.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
+        <circle cx="39.9" cy="36.6" r="0.95" fill="#FFFFFF"/>
+      </g></g>
+      <g class="sl-shut" fill="none" stroke="#0B2A3D" stroke-width="1.7" stroke-linecap="round">
+        <path d="M22.4 38.6 Q25 35.9 27.6 38.6"/><path d="M36.4 38.6 Q39 35.9 41.6 38.6"/>
+      </g>
+    </g>
   </symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l15-7-5 15-3-6-7-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></symbol>
@@ -63,6 +89,7 @@
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M18 7h2M4 17h3M12 17h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15.5" cy="7" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9.5" cy="17" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M15.5 15.5L20 20" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10.5 10.5v5.5M13.5 10.5v5.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5zM5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
@@ -259,6 +286,20 @@
     <span class="set-note" id="conn-note" role="status">Tokens are kept in your .env file and never shown again.</span>
   </footer>
 </section>
+
+<!-- deleting a session -->
+<dialog class="dialog" id="del-dialog" aria-labelledby="del-title">
+  <h2 id="del-title">Delete this session?</h2>
+  <p>Its conversation, its jobs and what Rimuru remembers about it are deleted for good.</p>
+  <label class="dialog-check" id="del-files-row" hidden><input type="checkbox" id="del-files">
+    <span>Also delete its files, in <code id="del-files-path"></code></span></label>
+  <p class="dialog-note" id="del-kept" hidden></p>
+  <p class="form-error" id="del-error" role="alert"></p>
+  <div class="dialog-actions">
+    <button type="button" class="ghost" id="del-cancel">Cancel</button>
+    <button type="button" class="danger-btn" id="del-confirm">Delete</button>
+  </div>
+</dialog>
 
 <script src="/static/app.js"></script>
 </body>

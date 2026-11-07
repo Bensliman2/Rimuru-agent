@@ -29,6 +29,7 @@ from ..agent.tools import ToolRegistry, b, enum, obj, register_recall, s
 from ..ids import new_id
 from ..sessions import display
 from ..models import Job, Session, Task
+from .. import persona
 from ..safety import hidden_instructions, warning_for_model
 from .files import LocalFiles, Refused
 from .shell import check_packages, deps_dir_for
@@ -217,6 +218,7 @@ class WorkerAgent:
         # arrive while it waits; queueing the brief first guarantees it reads
         # what its task is before it reads "any update on that?".
         brief = (
+            f"{persona.introduction(session)}\n\n"
             f'Your task is {self.task.id}: "{self.task.title}"\n\n'
             f"{self.task.brief}\n\n"
         )

@@ -61,11 +61,14 @@
       rows.push(`<button class="session on" data-chat="${esc(state.chat)}">
         <span class="session-title">New session</span><span class="session-sub">Not started yet</span></button>`);
     }
-    list.forEach((s) => rows.push(`<button class="session${s.key === state.chat ? " on" : ""}" data-chat="${esc(s.key)}"
+    list.forEach((s) => rows.push(`<div class="session-row">
+      <button class="session${s.key === state.chat ? " on" : ""}" data-chat="${esc(s.key)}"
         title="${esc(s.title)}">
         <span class="session-title">${esc(s.title)}</span>
         <span class="session-sub">${s.channel === "telegram" ? `<span class="via">Telegram</span>` : ""}${s.working ? `<span class="live-dot"></span>${s.working} working &middot; ` : ""}${since(s.last_ts)}</span>
-      </button>`));
+      </button>
+      <button class="session-del" data-del="${esc(s.key)}" title="Delete this session"
+        aria-label="Delete the session: ${esc(s.title)}">${icon("trash")}</button></div>`));
     $("session-list").innerHTML = rows.join("") ||
       '<p class="session-empty">Your sessions will appear here.</p>';
   }
@@ -236,22 +239,30 @@
 
   function switchSession(key) {
     if (key === state.chat) { closeSessions(); return; }
-    state.chat = key;
-    remember(key);
-    state.chatSig = "";
-    closePanel();
-    closeSessions();
-    renderFolder(null);
-    messagesEl.querySelectorAll(".msg, .event, .typing").forEach((n) => n.remove());
-    $("welcome").hidden = false;
-    renderSessions(state.sessions);
-    refresh();
-    input.focus();
+    const swapTo = async () => {
+      state.chat = key;
+      remember(key);
+      state.chatSig = "";
+      closePanel();
+      closeSessions();
+      renderFolder(null);
+      messagesEl.querySelectorAll(".msg, .event, .typing").forEach((n) => n.remove());
+      // A session with messages: no welcome screen flashing up while they load.
+      $("welcome").hidden = state.sessions.some((s) => s.key === key);
+      renderSessions(state.sessions);
+      await refresh();
+      input.focus();
+    };
+    smoothly(swapTo);
   }
+  // Page changes fade instead of jumping, where the browser can.
+  const smoothly = (change) => (document.startViewTransition &&
+    !matchMedia("(prefers-reduced-motion: reduce)").matches)
+    ? document.startViewTransition(change) : change();
+  const newKey = () => "s-" + Array.from(crypto.getRandomValues(new Uint8Array(4)),
+    (b) => b.toString(16).padStart(2, "0")).join("");
   function newSession() {
-    const key = "s-" + Array.from(crypto.getRandomValues(new Uint8Array(4)),
-      (b) => b.toString(16).padStart(2, "0")).join("");
-    switchSession(key);
+    switchSession(newKey());
   }
 
   const openSessions = () => { $("sessions").classList.add("open"); $("sessions-scrim").hidden = false; };
@@ -260,8 +271,50 @@
   $("sessions-scrim").addEventListener("click", closeSessions);
   $("new-session").addEventListener("click", newSession);
   $("session-list").addEventListener("click", (ev) => {
+    const del = ev.target.closest("[data-del]");
+    if (del) { askDelete(del.dataset.del); return; }
     const b = ev.target.closest("[data-chat]");
     if (b) switchSession(b.dataset.chat);
+  });
+
+  // Delete a session for good: its conversation, jobs and memories - and, only
+  // when ticked, Rimuru's own folder for it. A folder you picked is never touched.
+  function askDelete(key) {
+    const s = state.sessions.find((x) => x.key === key);
+    if (!s) return;
+    const dialog = $("del-dialog");
+    dialog.dataset.key = key;
+    $("del-title").textContent = `Delete “${s.title}”?`;
+    const files = $("del-files");
+    files.checked = false;
+    $("del-files-row").hidden = !(s.own_folder && s.folder);
+    $("del-files-path").textContent = s.folder ? `${s.folder}/` : "";
+    $("del-kept").hidden = !(s.folder && !s.own_folder);
+    $("del-kept").textContent = s.folder ? `Its files stay where they are, in ${s.folder}.` : "";
+    $("del-error").textContent = "";
+    dialog.showModal();
+  }
+  $("del-cancel").addEventListener("click", () => $("del-dialog").close());
+  $("del-confirm").addEventListener("click", async () => {
+    const dialog = $("del-dialog");
+    const key = dialog.dataset.key;
+    $("del-confirm").disabled = true;
+    try {
+      await api(`/api/chats/${encodeURIComponent(key)}?files=${$("del-files").checked ? "true" : "false"}`,
+        { method: "DELETE" });
+      dialog.close();
+      state.sessions = state.sessions.filter((x) => x.key !== key);
+      if (key === state.chat) {
+        state.chat = null;                         // to the most recent remaining one
+        switchSession(state.sessions.length ? state.sessions[0].key : newKey());
+      } else {
+        refresh();
+      }
+    } catch (e) {
+      $("del-error").textContent = e.message;
+    } finally {
+      $("del-confirm").disabled = false;
+    }
   });
 
   /* ------------------------------------------------------------- status */
@@ -320,10 +373,11 @@
         parts.push(`<div class="msg rimuru">${mark("rimuru", "avatar")}<div>
           <div class="bubble">${fmt(m.text)}</div><div class="time">${clock(m.ts)}</div></div></div>`);
       } else if (m.role === "event") {
+        const who = m.clone ? esc(m.clone) : "";
         const label = {
-          started: `A clone started: ${esc(m.title)}`,
-          done: `Finished: ${esc(m.title)}`,
-          failed: `Couldn't finish: ${esc(m.title)}`,
+          started: `${who || "A clone"} started: ${esc(m.title)}`,
+          done: `${who ? `${who} finished` : "Finished"}: ${esc(m.title)}`,
+          failed: `${who || "A clone"} couldn't finish: ${esc(m.title)}`,
           cancelled: `Stopped: ${esc(m.title)}`,
         }[m.kind] || esc(m.title);
         const lead = m.kind === "done" ? `<svg class="check"><use href="#i-check"/></svg>`
@@ -335,9 +389,13 @@
         parts.push(`<div class="event memory" title="Downloaded in a separate container that cannot see your files">
           <svg><use href="#i-file"/></svg><span>Installed for this session: ${esc(m.text)}</span></div>`);
       } else if (m.role === "memory") {
-        // Rimuru keeping (or dropping) a lasting fact - visible as it happens.
-        parts.push(`<a class="event memory" href="/inside#memory" title="See and change everything Rimuru remembers">
-          <svg><use href="#i-book"/></svg><span>${m.forgot ? "Forgot" : "Remembered"}: ${esc(m.text)}</span></a>`);
+        // Rimuru keeping (or dropping) a lasting fact - visible as it happens, and
+        // forgettable right here.
+        const forget = !m.forgot && m.kept
+          ? `<button class="forget" data-forget="${esc(m.memory_id)}" title="Forget this">Forget</button>` : "";
+        parts.push(`<div class="event memory${m.forgot ? " forgot" : m.kept === false ? " gone" : ""}">
+          <svg><use href="#i-book"/></svg><a href="/inside#memory" title="See and change everything Rimuru remembers">${
+            m.forgot ? "Forgot" : "Remembered"}: ${esc(m.text)}</a>${forget}</div>`);
       }
     }
     if (data.thinking) {
@@ -425,8 +483,9 @@
   };
   const isLive = (c) => c.phase === "working" || c.phase === "waiting";
 
-  function slime({ badge = null, mood = "step", size = "md", still = false } = {}) {
-    return `<span class="slime sl-${size} m-${mood}${still ? " still" : ""}" aria-hidden="true">
+  const beat = (id) => (Array.from(String(id || "")).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 997, 7) % 50) / 10;
+  function slime({ badge = null, mood = "step", size = "md", still = false, id = "" } = {}) {
+    return `<span class="slime sl-${size} m-${mood}${still ? " still" : ""}" style="--blink:${beat(id)}s" aria-hidden="true">
       <svg class="sl-body"><use href="#mark-clone"/></svg>
       ${badge ? `<span class="sl-badge">${icon(badge)}</span>` : ""}
       <span class="sl-fx"><i></i><i></i><i></i></span>
@@ -452,8 +511,9 @@
     if (c.attempt > 1 && isLive(c)) chips.push(`<span class="chip">Picked up after a restart</span>`);
     const who = c.asked_by && c.asked_by !== "you" && !c.from_chat ? `Asked by ${esc(c.asked_by)}. ` : "";
     return `<button class="card ${c.phase}" data-worker="${esc(c.id)}">
-      ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c) })}
+      ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c), id: c.id })}
       <div>
+        <div class="cname" title="${esc(c.name)} ${esc(c.persona_line)}">${esc(c.name)}<span> &middot; ${esc(c.persona)}</span></div>
         <div class="ctitle">${esc(c.title)}</div>
         <div class="cstatus">${status}</div>
         ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
@@ -474,6 +534,17 @@
     $("finished").innerHTML = finished.map(card).join("");
     $("stop").disabled = active.length === 0 && !w.sim_running;
   }
+
+  messagesEl.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("[data-forget]");
+    if (!b) return;
+    b.disabled = true;
+    try {
+      await api(`/api/memories/${encodeURIComponent(b.dataset.forget)}?chat=${encodeURIComponent(state.chat || "direct")}`,
+        { method: "DELETE" });
+      refreshChat();
+    } catch { b.disabled = false; }
+  });
 
   document.querySelector(".clones").addEventListener("click", (ev) => {
     const c = ev.target.closest(".card");
@@ -547,7 +618,7 @@
     state.panelSig = sig;
 
     $("panel-slime").innerHTML = slime({ badge: BADGE[c.stage], mood: c.stage, size: "lg", still: !live });
-    $("panel-title").textContent = c.title;
+    $("panel-title").textContent = `${c.name} · ${c.title}`;
     $("panel-sub").textContent = `${DOING[c.stage] || c.activity} \u00b7 ${ago(c.elapsed)}` +
       (c.asked_by && !c.from_chat ? ` \u00b7 asked by ${c.asked_by}` : "");
     const stopBtn = $("panel-stop");
@@ -1092,11 +1163,17 @@
   connect();
   refresh();
   autosize();
-  if (location.hash === "#models") openSettings();      // "Change" in Under the hood
-  if (location.hash.startsWith("#chat=")) {               // "Open this session" in Under the hood
-    switchSession(decodeURIComponent(location.hash.slice(6)));
-    history.replaceState(null, "", location.pathname);
+  function followHash() {
+    if (location.hash === "#models") openSettings();      // "Change" in Under the hood
+    if (location.hash.startsWith("#chat=")) {               // "Open this session" in Under the hood
+      switchSession(decodeURIComponent(location.hash.slice(6)));
+      history.replaceState(null, "", location.pathname);
+    }
   }
+  followHash();
+  // Opened ahead of time for a quick change of page: read the address when shown.
+  document.addEventListener("prerenderingchange", () => { followHash(); refresh(); });
+  window.addEventListener("hashchange", followHash);
   setInterval(refresh, 4000);       // ticks elapsed times; also a fallback
   input.focus();
 })();

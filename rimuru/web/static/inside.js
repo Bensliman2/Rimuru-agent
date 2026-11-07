@@ -33,8 +33,10 @@
   const short = (s, n = 140) => { s = String(s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
   const setHTML = (el, html) => { if (el && el._html !== html) { el.innerHTML = html; el._html = html; } };
 
-  function slime({ kind = "clone", badge = null, mood = "step", size = "md", still = false } = {}) {
-    return `<span class="slime sl-${size} m-${mood}${still ? " still" : ""}" aria-hidden="true">
+  // Each slime blinks on its own beat, taken from its ID.
+  const beat = (id) => (Array.from(String(id || "")).reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 997, 7) % 50) / 10;
+  function slime({ kind = "clone", badge = null, mood = "step", size = "md", still = false, id = "" } = {}) {
+    return `<span class="slime sl-${size} m-${mood}${still ? " still" : ""}" style="--blink:${beat(id)}s" aria-hidden="true">
       <svg class="sl-body"><use href="#mark-${kind}"/></svg>
       ${badge ? `<span class="sl-badge">${icon(badge)}</span>` : ""}
       <span class="sl-fx"><i></i><i></i><i></i></span></span>`;
@@ -248,8 +250,8 @@
     }
     $("clones-count").textContent = cards.length ? `(${cards.length})` : "";
     const row = (c) => `<button class="clone-row${c.id === state.clone ? " on" : ""}" data-clone="${esc(c.id)}">
-        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c) })}
-        <span class="row-main"><span class="row-title">${esc(c.title)}</span>
+        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c), id: c.id })}
+        <span class="row-main"><span class="row-title"><b class="row-name">${esc(c.name)}</b> ${esc(c.title)}</span>
           <span class="row-sub">${esc(DOING[c.stage] || c.activity)} &middot; ${ago(c.elapsed)}${
             c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</span></span></button>`;
     // Grouped by the session each clone works for - the busiest, most recent
@@ -285,8 +287,9 @@
     }
     const model = (state.sessions[c.id] || {}).model || "";
     setHTML($("clone-head"), `<div class="who-head big">
-        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "lg", still: !isLive(c) })}
-        <div><h2>${esc(c.title)}</h2>
+        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "lg", still: !isLive(c), id: c.id })}
+        <div><h2>${esc(c.name)} &middot; ${esc(c.title)}</h2>
+          <p class="persona-line">${esc(c.persona)} - ${esc(c.persona_line)}</p>
           <p class="muted">${esc(DOING[c.stage] || c.activity)} &middot; ${ago(c.elapsed)}${model ? ` &middot; ${esc(model)}` : ""}${
             c.files.length ? ` &middot; changed ${c.files.length} file${c.files.length > 1 ? "s" : ""}` : ""}${
             c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</p></div>
@@ -521,8 +524,8 @@
           g.folder ? ` &middot; files in <code>${esc(g.folder)}/</code>` : ""}${other ? "" : ` &middot; ${since(g.last_ts)}`}</div>
         </div>${other ? "" : `<a class="ghost small" href="/#chat=${encodeURIComponent(g.key)}">Open in the chat</a>`}</div>
       ${g.clones.map((c) => `<button class="mem-clone${c.id === pickedClone ? " on" : ""}" data-clone-detail="${esc(c.id)}">
-        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c) })}
-        <span class="row-main"><span class="row-title">${esc(c.title)}</span>
+        ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c), id: c.id })}
+        <span class="row-main"><span class="row-title"><b class="row-name">${esc(c.name)}</b> ${esc(c.title)}</span>
           <span class="row-sub">${esc(outcome(c))}${c.files.length ? ` &middot; ${c.files.length} file${c.files.length === 1 ? "" : "s"}` : ""}${
             c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</span></span>
         ${icon("chevron")}</button>`).join("")}
@@ -546,7 +549,7 @@
     const session = memory && [...memory.sessions, memory.other].find((g) => g.clones.some((x) => x.id === id));
     $("found-title").textContent = c.title;
     $("found").innerHTML = `
-      <div class="who-head">${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c) })}
+      <div class="who-head">${slime({ badge: BADGE[c.stage], mood: c.stage, size: "md", still: !isLive(c), id: c.id })}
         <div><p class="muted">${esc(outcome(c))}${session ? ` &middot; in “${esc(session.title)}”` : ""}</p></div></div>
       ${d.asked ? `<h3 class="mini">The job it was given</h3><div class="box">${esc(d.asked)}</div>` : ""}
       ${c.result ? `<h3 class="mini">What it reported</h3><div class="box">${esc(c.result)}</div>` : ""}
@@ -863,6 +866,8 @@
 
   connect();
   fromHash();
+  // Opened ahead of time for a quick change of page: read the address when shown.
+  document.addEventListener("prerenderingchange", fromHash);
   refresh();
   setInterval(() => { if (state.dirty) { state.dirty = false; refresh(); } }, 1200);
   setInterval(refresh, 5000);

@@ -107,6 +107,8 @@ THE DIRECT CHAT (channel "console" - and "telegram", the same person on their ph
     alone means the session that wrote last) - and pass it to dispatch_task too,
     so the clone is listed in that session. Keep sessions apart: do not bring
     one session's work into another unless the person does.
+  - Each clone has a name (it comes with the dispatch result). Telling the
+    person who is on it is fine - "Mika is on it" - and keeps it personal.
   - Answer first. When the person asks for something, reply in the SAME turn
     you act on it (reply and dispatch_task can go together), so they never
     wait through several of your turns before hearing from you.
@@ -400,7 +402,8 @@ class RouterAgent:
                 f"All {self.config.max_workers} worker slots are busy, so it is queued "
                 f"and starts when one frees up.")
         return (
-            f'Dispatched {mode}: {task.id} "{title}" -> worker {worker.id}{sub}. {when}\n'
+            f'Dispatched {mode}: {task.id} "{title}" -> worker {worker.id}, a clone named '
+            f"{worker.name or 'without a name'}{sub}. {when}\n"
             f"Follow-up events on that thread now reach the worker directly. "
             f"It will report back to you when it has a conclusion."
         )

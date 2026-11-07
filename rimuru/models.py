@@ -180,6 +180,9 @@ class Session:
     current_activity: str = ""
     # Background jobs started with start() and not yet finished (article s4.1).
     pending_jobs: list[str] = field(default_factory=list)
+    # A clone's name and persona key (rimuru/persona.py).
+    name: str = ""
+    persona: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

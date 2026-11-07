@@ -30,6 +30,7 @@ from ..hands.hub import RemoteError as HandsRemoteError, Unavailable as HandsUna
 from ..channels.github_live import GitHubChannel, Problem as GitHubProblem
 from ..channels.telegram import Problem as TelegramProblem, TelegramChannel
 from .. import memory as long_memory
+from .. import persona
 from .. import sessions as chats
 from ..ids import new_id
 from ..models import Memory
@@ -207,6 +208,9 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
                 "channel": thread.channel,
                 "folder": shown if folder.exists() and any(folder.iterdir()) else None,
                 "folder_abs": str(folder),
+                # Only Rimuru's own folder for a session can be deleted with it.
+                "own_folder": chats.folder_kind(thread) in {"made", "new"} and folder.is_dir()
+                              and folder.resolve().is_relative_to(system.config.sessions_dir.resolve()),
             })
         items.sort(key=lambda c: c["last_ts"], reverse=True)
         return {"items": items}
@@ -216,13 +220,18 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         store = system.store
         items: list[dict[str, Any]] = [dict(m) for m in store.chat
                                        if m.get("chat", chats.DEFAULT) == chat]
+        for item in items:
+            if item.get("role") == "memory" and not item.get("forgot"):
+                # Still kept? Then it can be forgotten from here.
+                item["kept"] = item.get("memory_id") in store.memories
         # Show, inside the conversation, when Rimuru hands work to a clone and
         # when that work comes back - so the chat and the clones connect.
         for task in store.tasks.values():
             if not in_session(task, chat):
                 continue
+            clone = store.sessions.get(task.worker_id or "")
             base = {"role": "event", "task_id": task.id, "worker_id": task.worker_id,
-                    "title": task.title}
+                    "title": task.title, "clone": persona.of(clone)[0] if clone else ""}
             items.append({**base, "kind": "started", "ts": task.created_ts})
             if task.finished_ts and task.status in {"done", "failed", "cancelled"}:
                 items.append({**base, "kind": task.status, "ts": task.finished_ts})
@@ -762,10 +771,22 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         return {"ok": True, "memory": mem.to_dict()}
 
     @app.delete("/api/memories/{memory_id}")
-    async def delete_memory(memory_id: str) -> dict[str, Any]:
-        if system.store.delete_memory(memory_id) is None:
+    async def delete_memory(memory_id: str, chat: str | None = None) -> dict[str, Any]:
+        gone = system.store.delete_memory(memory_id)
+        if gone is None:
             raise HTTPException(404, "No such memory.")
+        if chat:
+            # Forgotten from the chat: the chat says so, where it was remembered.
+            system.store.add_chat("memory", gone.text, chat=session_key(chat), forgot=True)
         return {"ok": True}
+
+    @app.delete("/api/chats/{key}")
+    async def delete_chat(key: str, files: bool = False) -> dict[str, Any]:
+        """Delete a session for good - and, only when asked, Rimuru's own folder for it."""
+        try:
+            return await system.delete_session(session_key(key), delete_folder=files)
+        except KeyError:
+            raise HTTPException(404, "No such session.") from None
 
     @app.get("/api/batching")
     async def batching(window: int = 8) -> dict[str, Any]:

@@ -16,7 +16,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from .. import memory
+from .. import memory, persona
 from ..context import inline_trigger
 from ..ids import new_id
 from ..llm import build_client
@@ -99,13 +99,19 @@ class WorkerPool:
             session.status = "queued"
             self.store.put_session(session)
         else:
+            session_id = new_id("worker")
+            # A name no clone at work has, and a persona (rimuru/persona.py).
+            name, character = persona.pick(session_id, (w.session.name for w in self.workers.values()
+                                                        if w.session.status not in TERMINAL))
             session = self.store.put_session(Session(
-                id=new_id("worker"),
+                id=session_id,
                 kind="worker",
                 title=task.title,
                 model=self.config.model_for("worker"),
                 status="queued",
                 task_id=task.id,
+                name=name,
+                persona=character,
             ))
 
         thread = self.store.threads.get(thread_id or task.thread_id or "")

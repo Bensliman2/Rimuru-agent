@@ -346,6 +346,13 @@ class Store:
     # ------------------------------------------------------------------ #
     # steps
     # ------------------------------------------------------------------ #
+    def save_step(self, step: Step) -> None:
+        """Rewrite a step already recorded (deleting a session scrubs Rimuru's turns)."""
+        self._write(
+            "INSERT OR REPLACE INTO steps (id, session_id, idx, ts, data) VALUES (?,?,?,?,?)",
+            (step.id, step.session_id, step.index, step.ts, json.dumps(step.to_dict())),
+        )
+
     def add_step(self, step: Step) -> Step:
         self.steps.setdefault(step.session_id, []).append(step)
         session = self.sessions.get(step.session_id)
@@ -363,6 +370,45 @@ class Store:
 
     def transcript(self, session_id: str) -> list[Step]:
         return self.steps.get(session_id, [])
+
+    # ------------------------------------------------------------------ #
+    # deleting a session for good
+    # ------------------------------------------------------------------ #
+    def _delete(self, table: str, column: str, values: list[str]) -> None:
+        # Table and column names are this module's own, never a request's.
+        for start in range(0, len(values), 400):
+            chunk = values[start:start + 400]
+            self._write(f"DELETE FROM {table} WHERE {column} IN ({','.join('?' * len(chunk))})", chunk)
+
+    def delete_session_records(self, thread_id: str) -> dict[str, int]:
+        """Forget a chat session: its conversation, its jobs, their clones and
+        every step they took, and what was remembered about it."""
+        thread = self.threads.pop(thread_id, None)
+        if thread is None:
+            return {}
+        self.thread_by_key.pop(f"{thread.channel}:{thread.key}", None)
+        triggers = [t.id for t in self.triggers.values() if t.thread_id == thread_id]
+        tasks = [t.id for t in self.tasks.values() if t.thread_id == thread_id]
+        clones = [t.worker_id for t in self.tasks.values() if t.thread_id == thread_id and t.worker_id]
+        jobs = [j.id for j in self.jobs.values() if j.session_id in clones]
+        chat = [m["id"] for m in self.chat if m.get("chat") == thread.key]
+        memories = [m.id for m in self.memories.values()
+                    if m.about == "session" and m.session_key == thread.key]
+        for ids, mirror in ((triggers, self.triggers), (tasks, self.tasks), (jobs, self.jobs),
+                            (memories, self.memories), (clones, self.sessions), (clones, self.steps)):
+            for key in ids:
+                mirror.pop(key, None)
+        self.chat[:] = [m for m in self.chat if m.get("chat") != thread.key]
+        self._delete("threads", "id", [thread_id])
+        self._delete("triggers", "id", triggers)
+        self._delete("tasks", "id", tasks)
+        self._delete("sessions", "id", clones)
+        self._delete("steps", "session_id", clones)
+        self._delete("contexts", "session_id", clones)
+        self._delete("jobs", "id", jobs)
+        self._delete("chat", "id", chat)
+        self._delete("memories", "id", memories)
+        return {"messages": len(chat), "jobs": len(tasks), "clones": len(clones), "memories": len(memories)}
 
     # ------------------------------------------------------------------ #
     # long-term memory

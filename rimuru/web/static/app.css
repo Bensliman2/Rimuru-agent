@@ -811,3 +811,70 @@ a.event { text-decoration: none; }
 .pairing p { font-size: 13px; margin: 0 0 6px; }
 .pairing pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
   padding: 8px 10px; margin: 6px 0; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
+
+/* ------------------------------------------------------------------ moving between pages, smoothly */
+/* The chat and Under the hood fade into each other; the top bar stays put. */
+@view-transition { navigation: auto; }
+.bar { view-transition-name: topbar; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .18s; }
+html { background: var(--bg); }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+
+/* ------------------------------------------------------------------ eyes */
+/* Every slime blinks on its own beat (--blink), glances up while it thinks,
+   looks down at its work, and rests its eyes when it is done. */
+.sl-open { transform-box: fill-box; transform-origin: 50% 55%; opacity: var(--eyes-open, 1);
+  animation: sl-blink 5.5s infinite; animation-delay: var(--blink, 0s); }
+.sl-shut { opacity: var(--eyes-shut, 0); }
+.sl-look { transform: translate(var(--look-x, 0px), var(--look-y, 0px)); transition: transform .5s ease; }
+@keyframes sl-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.12); } }
+.m-thinking { --look-x: 1.4px; --look-y: -1.6px; }
+.m-reading, .m-writing, .m-testing, .m-running { --look-y: 1.3px; }
+.m-done { --eyes-open: 0; --eyes-shut: 1; }
+@media (prefers-reduced-motion: reduce) { .sl-open { animation: none; } .sl-look { transition: none; } }
+
+/* ------------------------------------------------------------------ sessions: delete */
+.session-row { position: relative; }
+.session-row .session { padding-right: 34px; }
+.session-del {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+  border: 1px solid transparent; background: none; color: var(--faint); cursor: pointer; opacity: 0;
+}
+.session-del svg { width: 16px; height: 16px; }
+.session-row:hover .session-del, .session-row:focus-within .session-del { opacity: 1; }
+.session-del:hover, .session-del:focus-visible { color: var(--bad); background: var(--bad-soft); outline: none; }
+@media (hover: none) { .session-del { opacity: .7; } }
+
+.dialog {
+  width: min(440px, calc(100% - 32px)); padding: 20px 22px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: var(--shadow);
+}
+.dialog::backdrop { background: rgba(8, 15, 24, .38); }
+.dialog h2 { font-size: 16.5px; font-weight: 650; margin: 0 0 8px; overflow-wrap: anywhere; }
+.dialog p { font-size: 13.5px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; }
+.dialog-check { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; margin: 6px 0 10px; cursor: pointer; }
+.dialog-check input { margin-top: 3px; }
+.dialog-check code { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.dialog-note { font-size: 13px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.danger-btn { padding: 8px 16px; border-radius: 10px; border: 0; cursor: pointer; font-weight: 650;
+  font-size: 14px; background: var(--bad); color: #fff; }
+.danger-btn:disabled { opacity: .6; cursor: default; }
+
+/* ------------------------------------------------------------------ memories in the chat: forget */
+.event.memory a { color: inherit; text-decoration: none; }
+.event.memory a:hover { text-decoration: underline; }
+.event.memory .forget {
+  margin-left: 6px; padding: 1px 8px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12px;
+  font-weight: 600; color: var(--muted); background: var(--surface); border: 1px solid var(--border);
+}
+.event.memory .forget:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+.event.memory.gone, .event.memory.forgot { opacity: .7; }
+.event.memory.gone a { text-decoration: line-through; }
+
+/* ------------------------------------------------------------------ clones: a name and a persona */
+.cname { font-size: 12.5px; font-weight: 650; color: var(--accent-strong); }
+.cname span { font-weight: 500; color: var(--muted); }

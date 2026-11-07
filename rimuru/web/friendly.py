@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import time
 from typing import Any
+from .. import persona
 
 PASSED_RE = re.compile(r"(\d+) passed")
 FAILED_RE = re.compile(r"(\d+) failed")
@@ -213,6 +214,7 @@ def worker_card(store, session, conversation_channels) -> dict[str, Any]:
         stage = phase
     return {
         "id": session.id,
+        **persona.card(session),           # name, persona, persona_line
         "task_id": task.id if task else None,
         "title": (task.title if task else session.title) or "Untitled task",
         "phase": phase,

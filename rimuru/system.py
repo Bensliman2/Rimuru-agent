@@ -13,6 +13,7 @@ and tasks.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 
@@ -310,6 +311,123 @@ class RimuruSystem:
             max_workers=self.config.max_workers,
             bash_enabled=self.config.enable_bash,
         )
+
+    # ------------------------------------------------------------------ #
+    # deleting a session
+    # ------------------------------------------------------------------ #
+    async def delete_session(self, key: str, *, delete_folder: bool = False) -> dict[str, Any]:
+        """Forget a chat session for good. Its clones are stopped first; its files
+        go only when asked, and only from Rimuru's own folder for it - a folder
+        the person picked, or one on another machine, is never touched."""
+        import shutil
+
+        from .sessions import display, folder_for, folder_kind
+
+        thread = next((t for t in self.store.threads.values()
+                       if t.key == key and t.channel in self.config.conversation_channels), None)
+        if thread is None:
+            raise KeyError(key)
+        loops = []
+        for task in [t for t in self.store.tasks.values()
+                     if t.thread_id == thread.id and t.status in {"queued", "running"}]:
+            worker = self.pool.workers.get(task.worker_id or "")
+            await self.pool.stop(task, reason="the session was deleted")
+            if worker is not None:
+                loops.append(worker.loop)
+        await asyncio.gather(*(loop.join(timeout=5.0) for loop in loops), return_exceptions=True)
+
+        folder = None
+        if delete_folder and folder_kind(thread) in {"made", "new"}:
+            path = folder_for(self.config, thread).resolve()
+            base = self.config.sessions_dir.resolve()
+            if path != base and path.is_relative_to(base) and path.is_dir():
+                await asyncio.to_thread(shutil.rmtree, path)
+                folder = display(path)
+
+        # News about it that has not reached Rimuru yet is dropped, and a step it
+        # is taking right now ends first - otherwise either would bring it back.
+        marks = (thread.id, f"{thread.channel} {thread.key}")
+        inbox = self.router.loop.inbox
+        waiting = []
+        while not inbox.empty():
+            waiting.append(inbox.get_nowait())
+        for item in waiting:
+            if not any(m in item.text for m in marks):
+                inbox.put_nowait(item)
+        for _ in range(150):
+            if self.router.session.status not in {"thinking", "tool"}:
+                break
+            await asyncio.sleep(0.1)
+
+        clones = [t.worker_id for t in self.store.tasks.values() if t.thread_id == thread.id]
+        counts = self.store.delete_session_records(thread.id)
+        for clone in clones:
+            self.pool.workers.pop(clone or "", None)
+            self.pool.launched.discard(clone or "")
+        self._forget_in_router(thread)
+        self._forget_in_rimurus_turns(marks)
+        kept = [e for e in self.bus.history if not any(m in str(e) for m in marks)]
+        self.bus.history.clear()
+        self.bus.history.extend(kept)
+        self.bus.emit("chat.deleted", key=key)
+        return {"ok": True, "folder_deleted": folder, **counts}
+
+    def _forget_in_rimurus_turns(self, marks: tuple[str, ...]) -> None:
+        """Its record of turns (Under the hood -> Rimuru) too: each turn about the
+        deleted session, from the event that began it to its last step."""
+        gone = "(removed: part of a session the person deleted)"
+        redacting = False
+        for step in self.store.transcript(self.router.session.id):
+            mentions = any(m in json.dumps(step.to_dict()) for m in marks)
+            if step.batch_size >= 1:                 # a new turn begins here
+                redacting = mentions
+            if not (redacting or mentions):
+                continue
+            step.injected, step.thinking = gone, ""
+            step.text = gone if step.text else ""
+            step.tool_calls = [{**c, "args": {k: gone for k in (c.get("args") or {})}}
+                               for c in step.tool_calls]
+            step.tool_results = [{**r, "output": gone} for r in step.tool_results]
+            self.store.save_step(step)
+
+    def _forget_in_router(self, thread: Any) -> None:
+        """Take a deleted session out of what Rimuru has in mind: each event about
+        it, and Rimuru's handling of that event, is replaced by a placeholder.
+        The shape of the conversation stays, so the model API still accepts it."""
+        marks = (thread.id, f"{thread.channel} {thread.key}")
+        gone = "(removed: part of a session the person deleted)"
+        about = lambda text: any(m in str(text) for m in marks)  # noqa: E731
+        loop, redacting = self.router.loop, False
+        out: list[Msg] = []
+        for msg in loop.messages:
+            content = msg.content
+            if msg.role == "user" and isinstance(content, str):
+                redacting = about(content)
+                out.append(Msg(role="user", content=gone) if redacting else msg)
+                continue
+            if not (redacting or about(content)):
+                out.append(msg)
+                continue
+            if isinstance(content, str):
+                out.append(Msg(role=msg.role, content=gone))
+                continue
+            blocks = []
+            for block in content or []:
+                block = dict(block)
+                if block.get("type") in {"text", "reasoning"}:
+                    block["text"] = gone
+                elif block.get("type") == "tool_result":
+                    block["content"] = gone
+                elif block.get("type") == "tool_use":
+                    block["input"] = {k: gone for k in (block.get("input") or {})}
+                blocks.append(block)
+            out.append(Msg(role=msg.role, content=blocks))
+        loop.messages = out
+        if self.router.latest_console_thread == thread.id:
+            self.router.latest_console_thread = None
+        # Saved now, busy or not: the copy on disk must not bring it back after a
+        # restart. A turn in progress saves again, from this list, at its next step.
+        loop._save(None)
 
     # ------------------------------------------------------------------ #
     # recovery after a crash or restart (article s5.1: state outlives compute)

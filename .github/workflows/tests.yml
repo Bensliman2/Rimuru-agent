@@ -1,0 +1,41 @@
+# Every push: all the tests - the sandbox ones too, which need Docker - plus a
+# check that the pages' scripts parse and that the Docker setup builds.
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  tests:
+    name: Every test, sandbox included
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt pytest
+      - name: Build the clones' sandbox, so its tests run
+        run: docker build -t "$(python -c 'from rimuru.worker.shell import SANDBOX_IMAGE as i; print(i)')" sandbox
+      - name: Run the tests
+        run: python -m pytest -q
+      - name: The pages' scripts parse
+        run: |
+          node --check rimuru/web/static/app.js
+          node --check rimuru/web/static/inside.js
+
+  docker:
+    name: Docker image and compose file
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: The compose file is valid
+        run: docker compose config --quiet
+      - name: The app's image builds
+        run: docker build -t rimuru:ci .

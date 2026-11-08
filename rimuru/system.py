@@ -35,7 +35,7 @@ from .models import TERMINAL, Task, Trigger
 from .recall import describe_graph
 from .connections import Connections
 from .hands.hub import HandsHub
-from .safety import notice_for_person
+from .safety import PASTED_KEY_NOTE, notice_for_person, redact
 from . import commands, sessions as chats
 from . import skills as skillbook
 from .sessions import title_from, title_of
@@ -641,13 +641,17 @@ class RimuruSystem:
         """Everything a person types in a session: a command (/status, /init), a
         message with skills forced (/skill_web_pages build a page), or a plain
         message for Rimuru. A command or a refusal is answered at once ("said")."""
-        text = (text or "").strip()
+        # A key pasted into the chat stops here: not stored, not sent to any AI service.
+        text, pasted = redact((text or "").strip())
+        warned = {"said": PASTED_KEY_NOTE} if pasted else {}
         if commands.parse(text) is not None:
             return await self.run_command(thread_key, text, channel=channel)
         picked = skillbook.forced(text)
         if picked is None:
             trigger = await self.human_message(text, channel=channel, thread_key=thread_key, author=author)
-            return {"ok": True, "trigger_id": trigger.id}
+            if pasted:
+                self.store.add_chat("rimuru", PASTED_KEY_NOTE, chat=thread_key, notice="safety")
+            return {"ok": True, "trigger_id": trigger.id, **warned}
         names, rest = picked
         found, missing = skillbook.resolve(self.config.skills_dir, names)
         if missing or not rest:
@@ -658,7 +662,9 @@ class RimuruSystem:
             return {"ok": False, "said": said}
         trigger = await self.human_message(rest, channel=channel, thread_key=thread_key, author=author,
                                            skills=[s.name for s in found], said=text)
-        return {"ok": True, "trigger_id": trigger.id, "skills": [s.name for s in found]}
+        if pasted:
+            self.store.add_chat("rimuru", PASTED_KEY_NOTE, chat=thread_key, notice="safety")
+        return {"ok": True, "trigger_id": trigger.id, "skills": [s.name for s in found], **warned}
 
     def _no_such_skill(self, missing: list[str]) -> str:
         usable = [s for s in skillbook.load_all(self.config.skills_dir) if s.enabled]

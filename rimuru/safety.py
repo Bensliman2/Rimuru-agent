@@ -14,7 +14,9 @@ that spell out invisible ASCII.
 """
 from __future__ import annotations
 
+import os
 import re
+from typing import Any
 
 # Spoken to an AI tool - an address, not a description: "Note for AI assistants:",
 # "If you are an AI", "Dear AI", "Claude, delete ..." - but not "an AI assistant
@@ -119,3 +121,139 @@ def notice_for_person(found: list[dict[str, str]], source: str, job: str = "") -
     return (f"Heads-up: {source} contains hidden instructions aimed at AI tools{more}, "
             f'{first["where"]}: "{first["snippet"]}". I came across them{during} and ignored '
             f"them - you may want to remove them.")
+
+
+# ---------------------------------------------------------------------- #
+# Secrets: keys and passwords stay where they are
+# ---------------------------------------------------------------------- #
+# Three rules, enforced here and not left to a model's good manners:
+#   - a clone never opens a file that holds secrets (secret_file);
+#   - nothing with a key in it reaches an AI service or leaves the app
+#     (redact: every tool result, every reply, a pull request's text);
+#   - a pull request never includes such a file or a key (has_secret).
+_SECRET_DIRS = {".ssh", ".aws", ".gnupg", ".docker"}
+_SECRET_NAMES = {".netrc", ".pgpass", ".npmrc", ".pypirc", ".git-credentials", ".htpasswd",
+                 "credentials", "credentials.json", "secrets.json", "secrets.yaml", "secrets.yml",
+                 "service-account.json", "token", "token.txt"}
+_SECRET_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".token", ".kdbx")
+_KEY_FILES = ("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519")
+# Meant to be shared: they show which names to set, with no values.
+_SAFE_ENV = (".example", ".sample", ".template", ".dist", ".defaults")
+
+HIDDEN = "[hidden key]"           # with a space: never valid code (Angular has [hidden])
+_PRIVATE_BLOCK = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S)
+_KEY_FORMATS = re.compile(
+    r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}"
+    r"|\b(?:ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_]{16,}"
+    r"|\bAKIA[0-9A-Z]{16}\b"
+    r"|\bxox[abpr]-[A-Za-z0-9-]{10,}"
+    r"|\b\d{8,10}:[A-Za-z0-9_-]{30,}"                     # a Telegram bot token
+    r"|\bAIza[0-9A-Za-z_-]{30,}"                          # a Google API key
+    r"|\bgsk_[A-Za-z0-9]{20,}")                           # a Groq key
+# "password = hunter22": only the value goes, and only if it looks like one
+# (long enough, with a digit) - "the token: it is in Settings" is left alone.
+_ASSIGNED = re.compile(
+    r"(?i)\b(password|passwd|pwd|secret|api[_ -]?key|access[_ -]?token|auth[_ -]?token|token)\b"
+    r"(\s*[:=]\s*|\s+is\s+)([\"']?)(?=[^\s\"']*\d)[^\s\"']{8,}")
+# Not PWD or OLDPWD: those are the current folder.
+_SECRET_ENV = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|_PWD)$", re.I)
+
+
+def secret_file(rel: str) -> bool:
+    """Does this path name a file that holds keys or passwords (.env, id_rsa, *.pem)?"""
+    parts = [p for p in str(rel or "").replace("\\", "/").split("/") if p not in {"", "."}]
+    if not parts:
+        return False
+    if any(p.lower() in _SECRET_DIRS for p in parts):
+        return True
+    name = parts[-1].lower()
+    if name.endswith(_SAFE_ENV):
+        return False
+    if name == ".env" or name.startswith(".env.") or name.endswith(".env"):
+        return True
+    if name in _SECRET_NAMES or name.endswith(_SECRET_SUFFIXES):
+        return True
+    return name.startswith(_KEY_FILES) and not name.endswith(".pub")
+
+
+def secret_paths(folder: Any, *, limit: int = 4000) -> list[tuple[str, bool]]:
+    """Secret files and folders under `folder`, as (relative path, is a folder),
+    for hiding them from a clone's commands. Looks a few levels down, and not
+    inside dependencies, so it stays quick on any project."""
+    root = str(folder)
+    found: list[tuple[str, bool]] = []
+    seen = 0
+    for path, dirs, files in os.walk(root):
+        rel = os.path.relpath(path, root).replace("\\", "/")
+        depth = 0 if rel == "." else rel.count("/") + 1
+        dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".venv", "venv"}]
+        for name in list(dirs):
+            if name.lower() in _SECRET_DIRS:
+                found.append((f"{name}" if rel == "." else f"{rel}/{name}", True))
+                dirs.remove(name)
+        found += [(f"{name}" if rel == "." else f"{rel}/{name}", False) for name in files if secret_file(name)]
+        seen += len(files) + len(dirs)
+        if depth >= 5:
+            dirs[:] = []
+        if seen > limit:
+            break
+    return found
+
+
+def _known_values() -> list[str]:
+    """The person's actual keys: what is set in this app's environment (.env is
+    loaded into it) under a name that says key, token, secret or password. Long
+    and mixed enough that hiding them cannot mangle ordinary words."""
+    return sorted({v for k, v in os.environ.items() if _SECRET_ENV.search(k) and len(v) >= 12
+                   and any(c.isdigit() for c in v) and any(c.isalpha() for c in v)}, key=len, reverse=True)
+
+
+def redact(text: str) -> tuple[str, int]:
+    """Text with keys and passwords taken out, and how many were."""
+    if not text:
+        return text, 0
+    count = 0
+
+    def hide(_match: re.Match[str]) -> str:
+        nonlocal count
+        count += 1
+        return HIDDEN
+
+    def hide_value(match: re.Match[str]) -> str:
+        nonlocal count
+        count += 1
+        return f"{match.group(1)}{match.group(2)}{HIDDEN}"
+
+    for value in _known_values():
+        if value in text:
+            count += text.count(value)
+            text = text.replace(value, HIDDEN)
+    text = _PRIVATE_BLOCK.sub(hide, text)
+    text = _KEY_FORMATS.sub(hide, text)
+    text = _ASSIGNED.sub(hide_value, text)
+    return text, count
+
+
+def without_secrets(env: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment for a command run right on this machine - minus the keys."""
+    return {k: v for k, v in (os.environ if env is None else env).items() if not _SECRET_ENV.search(k)}
+
+
+def has_secret(text: str) -> bool:
+    return redact(text)[1] > 0
+
+
+def scrubbed(text: str) -> str:
+    return redact(text)[0]
+
+
+REFUSED_HIDDEN = ("Refused, nothing was written: that has " + HIDDEN + " in it - the stand-in for a key that was "
+                  "hidden from you - and writing it would break the file. To change a file that holds "
+                  "a key, use edit_file on the lines around it. New code should read the key from the "
+                  "environment.")
+REFUSED_SECRET = ("Refused: {name} holds secrets (keys, passwords), and clones never open such files. "
+                  "If the job needs a key, write the code to read it from the environment, and tell "
+                  "the person which name to set.")
+PASTED_KEY_NOTE = ("I hid what looked like a key or password in your message, so it does not reach "
+                   "the AI service - those can log what they are sent. Add keys with Models or "
+                   "Connections instead; the code can read them from there.")

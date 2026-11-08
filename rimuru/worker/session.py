@@ -31,8 +31,9 @@ from ..sessions import display
 from ..models import Job, Session, Task
 from .. import persona
 from .. import skills as skillbook
-from ..safety import hidden_instructions, warning_for_model
-from .files import LocalFiles, Refused
+from ..safety import (HIDDEN, REFUSED_HIDDEN, REFUSED_SECRET, hidden_instructions, secret_file,
+                      warning_for_model)
+from .files import LocalFiles, Refused, SecretFile
 from .shell import check_packages, deps_dir_for
 
 SYSTEM_PROMPT = """You are a Worker session inside a Super-agent called Rimuru.
@@ -557,13 +558,16 @@ class WorkerAgent:
         if not found:
             return "(no files)"
         more = f"\n... and {len(found) - 200} more" if len(found) > 200 else ""
-        return "\n".join(found[:200]) + more
+        return "\n".join(f"{name}  (holds secrets - cannot be opened)" if secret_file(name) else name
+                         for name in found[:200]) + more
 
     async def _tool_read_file(self, args: dict[str, Any], loop: AgentLoop) -> str:
         raw = str(args.get("path") or "")
         try:
             text = await self.files.read(raw)
             name = self.files.name(raw)
+        except SecretFile:
+            return REFUSED_SECRET.format(name=raw)
         except Refused:
             return "Refused: that path is outside the workspace."
         except Exception as exc:  # noqa: BLE001
@@ -592,8 +596,12 @@ class WorkerAgent:
         raw = str(args.get("path") or "")
         content = str(args.get("content") or "")
         base = str(args.get("base_version") or "").strip()
+        if HIDDEN in content:                  # a whole-file rewrite would destroy the real key
+            return REFUSED_HIDDEN
         try:
             existing = await self.files.read(raw)
+        except SecretFile:
+            return REFUSED_SECRET.format(name=raw)
         except Refused:
             return "Refused: that path is outside the workspace."
         except Exception as exc:  # noqa: BLE001
@@ -617,8 +625,12 @@ class WorkerAgent:
     async def _tool_edit_file(self, args: dict[str, Any], loop: AgentLoop) -> str:
         raw = str(args.get("path") or "")
         old, new = str(args.get("old") or ""), str(args.get("new") or "")
+        if HIDDEN in old or HIDDEN in new:
+            return REFUSED_HIDDEN
         try:
             text = await self.files.read(raw)
+        except SecretFile:
+            return REFUSED_SECRET.format(name=raw)
         except Refused:
             return "Refused: that path is outside the workspace."
         except Exception as exc:  # noqa: BLE001

@@ -28,8 +28,11 @@ import re
 import shutil
 import subprocess
 import threading
+import tempfile
 from pathlib import Path
 from typing import Any
+
+from ..safety import secret_paths, without_secrets
 
 SANDBOX_IMAGE = "rimuru-sandbox:2"          # a new tag rebuilds the image on the next start
 SANDBOX_DIR = Path(__file__).resolve().parents[2] / "sandbox"
@@ -129,7 +132,7 @@ class HostShell:
         cwd = Path(workdir or self.workspace)
         cwd.mkdir(parents=True, exist_ok=True)
         proc = await asyncio.to_thread(
-            subprocess.Popen, command, shell=True, cwd=str(cwd),
+            subprocess.Popen, command, shell=True, cwd=str(cwd), env=without_secrets(),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         try:
@@ -150,8 +153,11 @@ class DockerShell:
     kind = "docker"
 
     def __init__(self, workspace: Path, *, image: str = SANDBOX_IMAGE,
-                 memory: str = "1g", cpus: str = "2") -> None:
+                 memory: str = "1g", cpus: str = "2", blank_dir: Path | None = None) -> None:
         self.workspace = Path(workspace).resolve()
+        # Where the empty stand-in for secret files lives. In Docker Compose this
+        # must be a folder the sandbox service shares (the data folder).
+        self.blank_dir = Path(blank_dir or tempfile.gettempdir())
         self.image = image
         self.memory = memory
         self.cpus = cpus
@@ -242,6 +248,10 @@ class DockerShell:
         folder = Path(workdir or self.workspace).resolve()
         # Nothing gets in or out; only this job's folder is visible.
         args = self._base(name, "none") + ["-v", f"{folder}:/workspace", "-w", "/workspace"]
+        # Files that hold keys are not there for a command: an empty file stands
+        # in for each, and an empty folder for the likes of .ssh.
+        for rel, is_folder in secret_paths(folder):
+            args += ["--tmpfs", f"/workspace/{rel}"] if is_folder else ["-v", f"{self._blank()}:/workspace/{rel}:ro"]
         if deps is not None and Path(deps).is_dir():
             # Packages installed for this folder (install()), read-only.
             args += ["-v", f"{Path(deps).resolve()}:/deps:ro",
@@ -253,6 +263,13 @@ class DockerShell:
                 # Where Node looks first. Not over a project's own node_modules.
                 args += ["-v", f"{modules.resolve()}:/workspace/node_modules:ro"]
         return args + [self.image, "sh", "-c", command]
+
+    def _blank(self) -> Path:
+        self.blank_dir.mkdir(parents=True, exist_ok=True)
+        path = (self.blank_dir / ".rimuru-blank").resolve()
+        if not path.exists():
+            path.touch()
+        return path
 
     def _install_args(self, packages: list[str], kind: str, name: str, deps: Path) -> list[str]:
         """Has the internet, and sees ONLY the package folder: never the person's
@@ -333,7 +350,7 @@ def make_shell(config: Any, *, speed: float = 1.0):
         return SimulatedShell(mock=mock, speed=speed), f"shell: simulated ({reason})"
 
     if DockerShell.available():
-        shell = DockerShell(config.workspace)
+        shell = DockerShell(config.workspace, blank_dir=Path(config.db_path).resolve().parent)
         orphans = shell.cleanup_orphans()
         shell.prepare_in_background()
         return shell, "shell: docker sandbox (isolated, no network)" + (

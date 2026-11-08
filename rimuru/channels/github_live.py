@@ -33,6 +33,7 @@ import httpx
 
 from ..ids import new_id
 from ..models import Trigger
+from ..safety import has_secret, scrubbed, secret_file
 from .base import ASYNC_NORMS
 
 log = logging.getLogger("rimuru.github")
@@ -274,7 +275,11 @@ class GitHubChannel:
         if not (await self.git(folder, gitdir, "status", "--porcelain")).strip():
             return "no code changed, so no pull request was opened"
         title = " ".join(str(worker.task.title).split())[:72]
+        summary = scrubbed(summary)
         await self.git(folder, gitdir, "add", "-A")
+        held = await self._hold_back_secrets(folder, gitdir)
+        if not (await self.git(folder, gitdir, "diff", "--cached", "--name-only")).strip():
+            return f"no pull request: the only changes hold keys, so they stayed here ({', '.join(held)})"
         await self.git(folder, gitdir, "commit", "--quiet", "-m",
                        f"{title}\n\n{summary.strip()[:2000]}\n\nFor #{number}. Made by Rimuru, an AI assistant.",
                        config=("user.name=Rimuru", "user.email=rimuru@users.noreply.github.com"))
@@ -282,8 +287,26 @@ class GitHubChannel:
         await self.git(folder, gitdir, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}",
                        auth=True)
         url, draft = await self._pull_request(repo, number, branch, title, summary)
+        kept = f"; left out because they hold keys: {', '.join(held)}" if held else ""
         return f"pull request: {url}" + (" (a draft - nothing is merged)" if draft
-                                         else " (ready for review - nothing is merged)")
+                                         else " (ready for review - nothing is merged)") + kept
+
+    async def _hold_back_secrets(self, folder: Path, gitdir: Path) -> list[str]:
+        """Unstage every file that holds keys - by its name, or by what is in it.
+        A pull request is public to everyone on the repository, and git never forgets."""
+        staged = await self.git(folder, gitdir, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
+        held = []
+        for rel in filter(None, staged.split("\0")):
+            path = folder / rel
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace") if path.stat().st_size < 2_000_000 else ""
+            except OSError:
+                text = ""
+            if secret_file(rel) or has_secret(text):
+                held.append(rel)
+        if held:
+            await self.git(folder, gitdir, "reset", "--quiet", "HEAD", "--", *held)
+        return held
 
     async def _pull_request(self, repo: str, number: int, branch: str, title: str,
                             summary: str) -> tuple[str, bool]:

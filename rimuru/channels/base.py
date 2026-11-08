@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from ..safety import scrubbed
+
 CHAT_WORD_CAP = 100
 
 
@@ -91,7 +93,7 @@ class ChannelRegistry:
     async def send(self, channel_name: str, thread_key: str, text: str) -> tuple[str, str]:
         """Deliver a reply. Returns (what_was_sent, note_for_the_model)."""
         norms = self.norms_for(channel_name)
-        sent, note = enforce_norms(text, norms)
+        sent, note = enforce_norms(scrubbed(text), norms)   # no reply carries a key
 
         message = OutboundMessage(
             ts=time.time(), channel=channel_name, thread_key=thread_key,

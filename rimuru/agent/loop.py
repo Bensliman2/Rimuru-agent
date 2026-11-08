@@ -28,6 +28,7 @@ from ..context import trim_messages
 from ..ids import new_id
 from ..llm.base import LLMClient, Msg, ProviderAccountError
 from ..models import Session, Step, Usage, now
+from ..safety import scrubbed
 from .tools import ToolRegistry
 
 
@@ -192,7 +193,8 @@ class AgentLoop:
     # ------------------------------------------------------------------ #
     def inject(self, text: str, *, kind: str = "event", trigger_id: str | None = None, **meta: Any) -> None:
         """Hand something to this session. Never blocks."""
-        injection = Injection(text=text, kind=kind, trigger_id=trigger_id, meta=meta)
+        # The one door into a model's context from outside: no key goes through it.
+        injection = Injection(text=scrubbed(text), kind=kind, trigger_id=trigger_id, meta=meta)
         self.inbox.put_nowait(injection)
         self.bus.emit(
             "session.injected",
@@ -564,8 +566,9 @@ class AgentLoop:
             output = str(result)
         except Exception as exc:
             output = f"tool {name} failed: {type(exc).__name__}: {exc}"
-        # Providers reject empty tool_result content on some paths.
-        output = output or "(no output)"
+        # Providers reject empty tool_result content on some paths. And whatever a
+        # tool brought back - a command's output, say - no key goes to the AI service.
+        output = scrubbed(output) or "(no output)"
         self.bus.emit(
             "tool.returned", session_id=self.session.id, tool=name, preview=output[:240],
         )

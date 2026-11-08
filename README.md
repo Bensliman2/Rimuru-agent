@@ -135,6 +135,18 @@ Each of these properties has an automated test (`tests/test_sandbox.py`).
 `RIMURU_SHELL=host` runs commands directly on your machine instead - unsandboxed, so
 only use it knowingly.
 
+**Your keys stay yours** (`rimuru/safety.py`, `tests/test_secrets.py`):
+
+- Clones never open a file that holds secrets (`.env`, `id_rsa`, `*.pem`, `.ssh/`...) and
+  never overwrite one. Their commands don't see those files either: in the sandbox an
+  empty file stands in for each.
+- No key reaches an AI service or leaves the app: every tool result and every reply is
+  checked - for the keys you actually have set, and for the usual key formats - and a
+  key is replaced by `[hidden key]`. A clone can't write that stand-in back over the real
+  key.
+- A pull request never includes a file with a key in it; Rimuru says which it left out.
+- A key pasted into the chat is hidden before it is stored or sent, and Rimuru tells you.
+
 ## Connections: Telegram and GitHub
 
 The **Connections** button (next to Models) connects Rimuru to the outside. Only the
@@ -341,6 +353,6 @@ skills/          your skills, one Markdown file each - yours, not committed (see
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           114 automated checks
+tests/           144 automated checks
 run.py           serve | bench | verify | trace | eval | speed | hands
 ```

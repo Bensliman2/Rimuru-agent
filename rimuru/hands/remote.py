@@ -8,7 +8,7 @@ import asyncio
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from ..worker.files import Refused
+from ..worker.files import Refused, SecretFile
 
 PREFIX = "hands://"
 
@@ -42,6 +42,8 @@ class RemoteFiles:
         try:
             return await self.hub.request(self.machine_id, op, folder=self.folder, **args)
         except RemoteError as exc:
+            if "holds secrets" in str(exc):
+                raise SecretFile(str(exc)) from None
             if "outside" in str(exc):
                 raise Refused(str(exc)) from None
             raise

@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 from .. import commands
+from ..safety import scrubbed
 from ..ids import new_id
 from ..models import Trigger
 from .base import ChannelNorms
@@ -162,7 +163,7 @@ class TelegramChannel:
                 meta={"thread_title": str(chat.get("title") or "Telegram group")[:80]}))
 
     async def send(self, chat_id: Any, text: str) -> None:
-        text = (text or "").replace("**", "").strip() or "..."
+        text = scrubbed(text or "").replace("**", "").strip() or "..."
         for start in range(0, len(text), MAX_TEXT):
             await self.call("sendMessage", chat_id=chat_id, text=text[start:start + MAX_TEXT],
                             disable_web_page_preview=True)

@@ -8,12 +8,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..safety import secret_file
+
 SKIP = {"__pycache__", ".pytest_cache", ".git", "node_modules"}
 MAX_READ = 2_000_000
 
 
 class Refused(Exception):
     """Asked for something outside the folder."""
+
+
+class SecretFile(Refused):
+    """A file that holds keys or passwords: clones never open or overwrite it."""
 
 
 class LocalFiles:
@@ -45,11 +51,15 @@ class LocalFiles:
         path = self.path(rel)
         if not path.is_file():
             return None
+        if secret_file(self.name(rel)):
+            raise SecretFile(f"{self.name(rel)} holds secrets")
         # Text mode, like write(): line endings round-trip (CRLF on Windows).
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             return handle.read(MAX_READ)
 
     async def write(self, rel: str, text: str) -> None:
         path = self.path(rel)
+        if path.exists() and secret_file(self.name(rel)):   # never over the person's own keys
+            raise SecretFile(f"{self.name(rel)} holds secrets")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")

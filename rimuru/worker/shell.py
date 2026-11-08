@@ -215,7 +215,7 @@ class DockerShell:
                 if have.returncode != 0:
                     build = subprocess.run(
                         ["docker", "build", "-t", self.image, str(SANDBOX_DIR)],
-                        capture_output=True, text=True, timeout=900,
+                        capture_output=True, encoding="utf-8", errors="replace", timeout=900,
                     )
                     if build.returncode != 0:
                         self.error = "image build failed: " + (build.stderr or build.stdout)[-300:]

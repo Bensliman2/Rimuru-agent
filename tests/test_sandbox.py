@@ -129,3 +129,15 @@ def test_files_that_hold_secrets_are_empty_inside(shell, tmp_path):
     assert "super-secret-value" not in out and "private-key-material" not in out
     assert "visible" in out and (tmp_path / "made.txt").read_text().strip() == "written"
     assert (tmp_path / ".env").read_text() == "TOKEN=super-secret-value", "the real file is untouched"
+
+
+def test_a_folder_named_in_arabic_mounts_and_works(tmp_path):
+    folder = tmp_path / "موقع-لمقهى-جديد"
+    folder.mkdir()
+    (folder / "ملف.txt").write_text("مرحبا", encoding="utf-8")
+    sh = DockerShell(folder)
+    sh._ready.set()
+    status, out = run(sh, "cat ملف.txt && echo تم > نتيجة.txt && ls")
+    assert status == "done", out
+    assert "مرحبا" in out, "the file's text comes back readable"
+    assert (folder / "نتيجة.txt").read_text(encoding="utf-8").strip() == "تم"

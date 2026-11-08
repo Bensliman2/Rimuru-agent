@@ -366,6 +366,6 @@ skills/          your skills, one Markdown file each - yours, not committed (see
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           175 automated checks
+tests/           232 automated checks
 run.py           serve | bench | verify | trace | eval | speed | scale | hands
 ```

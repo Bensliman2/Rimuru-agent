@@ -28,6 +28,7 @@ from .. import memory
 from .. import skills as skillbook
 from ..models import Memory, Session, Task
 from ..recall import spill_digest
+from ..text import fold
 
 # People judge an assistant by how fast they get something that works
 # (docs/speed.md: the same calculator took 14.6 minutes the old way, 1.9 now).
@@ -40,10 +41,15 @@ SPEED
 """
 
 # A newer message that changes course, rather than adding to it. Only these make
-# a reply composed before them unsafe to send.
+# a reply composed before them unsafe to send. Matched against fold(message): no
+# accents or vowel marks, أ is ا, ة is ه.
 CORRECTION = re.compile(
     r"\b(actually|cancel|instead|never ?mind|stop|don'?t|do not|wait|scratch that|"
-    r"forget|rather|no longer|hold on|undo|change of plan)\b", re.IGNORECASE)
+    r"forget|rather|no longer|hold on|undo|change of plan|"
+    r"annule[rz]?|arrete[rz]?|attends|attendez|laisse[z]?\s+tomber|en\s+fait|plutot|finalement|"
+    r"oublie[rz]?|au\s+lieu|ne\s+fais\s+pas|ne\s+faites\s+pas|changement\s+de\s+plan|"
+    "توقف|اوقف|وقف|الغ|الغي|الغاء|انتظر|استني|بدلا|بدل|في\\s+الواقع|انس|انسي|تراجع|بلاش|"
+    "لا\\s+تفعل|لا\\s+تعمل|لا\\s+تكمل|خلاص)\\b", re.IGNORECASE)
 
 SYSTEM_PROMPT = """You are the Router layer of a Super-agent called Rimuru.
 
@@ -115,7 +121,8 @@ THE DIRECT CHAT (channel "console" - and "telegram", the same person on their ph
     goes to that same clone (it remembers the work) unless you pass fresh.
   - On Telegram (their phone): never paste code or file contents into a reply.
     Just do the job, then say in plain words what was done and how to use it.
-    Only when they ask for the files or the code, call send_files.
+    Only when they ask for the files or the code, in whatever language, call
+    send_files - or, for a few lines they asked to see, reply with include_code.
   - Answer first. When the person asks for something, reply in the SAME turn
     you act on it (reply and dispatch_task can go together), so they never
     wait through several of your turns before hearing from you.
@@ -290,6 +297,8 @@ class RouterAgent:
             obj(
                 thread_id=s("Thread to reply on (thr_...)"),
                 text=s("What to say. Conclusions and direct questions only."),
+                include_code=s("'true' only when the person asked to see code, in any language. Otherwise "
+                               "code blocks are left out on channels read on a phone.", optional=True),
             ),
             self._tool_reply,
         )
@@ -486,7 +495,7 @@ class RouterAgent:
                 t for t in (self.store.triggers.get(i) for i in thread.trigger_ids)
                 if t is not None and t.kind == "human_direct" and t.ts > loop.turn_started_ts
             ]
-            corrections = [t for t in newer if CORRECTION.search(t.content)]
+            corrections = [t for t in newer if CORRECTION.search(fold(t.content))]
             if corrections:
                 self.bus.emit("router.reply_held", thread_id=thread.id, newer=len(newer))
                 latest = " ".join(corrections[-1].content.split())[:300]
@@ -496,7 +505,9 @@ class RouterAgent:
                 newer_note = ("\nThe person has written again since this turn began; their "
                               "new message comes in with this result.")
 
-        sent, note = await self.channels.send(thread.channel, thread.key, text)
+        sent, note = await self.channels.send(
+            thread.channel, thread.key, text,
+            include_code=str(args.get("include_code") or "").lower() in {"true", "yes", "1"})
         self._replied_ts = time.time()
         self.bus.emit(
             "agent.replied", thread_id=thread.id, channel=thread.channel,

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from rimuru.channels.base import CODE_LEFT_OUT, ChannelRegistry
 from rimuru.channels.github_live import SIGNATURE, GitHubChannel
 from rimuru.channels.telegram import Problem, TelegramChannel
 from rimuru.config import Config
@@ -127,12 +128,14 @@ def test_telegram_gets_the_job_done_not_code_unless_asked(tmp_path, monkeypatch)
         assert await tg.send_job_files(task) == ["index.html"]
         assert len(docs) == 1 and b"<h1>todo</h1>" in docs[0]
 
-        # Code stays out of a reply unless the person's last message asked for it.
-        system.store.add_chat("user", "make the title blue", chat="tg-111")
-        await tg.deliver("tg-111", "Done - the title is blue.\n```css\nh1 { color: blue }\n```\nReload it.")
-        assert "color: blue" not in texts[-1] and "send me the code" in texts[-1] and "Reload it." in texts[-1]
-        system.store.add_chat("user", "can you send me the code?", chat="tg-111")
-        await tg.deliver("tg-111", "Here it is:\n```css\nh1 { color: blue }\n```")
+        # Code stays out of a reply unless Rimuru says the person asked for it.
+        channels = ChannelRegistry()
+        channels.register(tg)
+        _sent, note = await channels.send("telegram", "tg-111",
+                                          "Done - the title is blue.\n```css\nh1 { color: blue }\n```\nReload it.")
+        assert "color: blue" not in texts[-1] and CODE_LEFT_OUT in texts[-1] and "Reload it." in texts[-1]
+        assert "include_code" in note, "Rimuru is told, so it can send it if the person did ask"
+        await channels.send("telegram", "tg-111", "Here it is:\n```css\nh1 { color: blue }\n```", include_code=True)
         assert "h1 { color: blue }" in texts[-1]
         system.store.close()
 

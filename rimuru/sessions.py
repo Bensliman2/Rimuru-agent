@@ -18,6 +18,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .text import fold, name_words
+
 DEFAULT = "direct"
 # A session made before its first message (its folder was picked first).
 UNNAMED = "New session"
@@ -36,15 +38,27 @@ def is_session(thread: Any, config: Any) -> bool:
     return thread is not None and thread.channel in config.conversation_channels
 
 
+# Never the last word of a name. Compared after fold().
+_TAIL = {fold(w) for w in """a an the and or of for to in on with by at
+le la les un une de du des et ou pour avec dans sur par au aux
+في من إلى على مع و""".split()}
+
+
+def _fit(words: list[str], limit: int) -> list[str]:
+    """As many whole words as fit - or the start of the first one, if it is
+    already too long (Chinese and Japanese are written without spaces)."""
+    kept: list[str] = []
+    for word in words:
+        if len("-".join([*kept, word])) > limit:
+            break
+        kept.append(word)
+    return kept or [word[:limit] for word in words[:1]]
+
+
 def folder_name(thread: Any) -> str:
     """Readable and stable: the session's name, cut at a word, plus its own ID."""
-    words: list[str] = []
-    for word in re.findall(r"[a-z0-9]+", (thread.title or "").lower()):
-        if len("-".join([*words, word])) > 40:
-            break
-        words.append(word)
-    while len(words) > 1 and words[-1] in {"a", "an", "the", "and", "or", "of", "for", "to",
-                                           "in", "on", "with", "by", "at"}:
+    words = _fit(name_words(thread.title), 40)
+    while len(words) > 1 and fold(words[-1]) in _TAIL:
         words.pop()                      # never end a name on a filler word
     slug = "-".join(words)
     tail = re.sub(r"[^a-z0-9]", "", thread.key.lower())[-6:] or "session"
@@ -75,24 +89,21 @@ def folder_kind(thread: Any) -> str:
 
 # Words that say what to do rather than what the thing is: a folder is called
 # "browser-calculator", not "build-a-browser-calculator".
-_LEAD = {"build", "make", "create", "write", "add", "fix", "please", "can", "could", "you", "u",
-         "i", "want", "need", "a", "an", "the", "me", "my", "some", "something", "help", "hi",
-         "hey", "hello", "new", "simple", "small", "quick"}
-_TAIL = {"a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "with", "by", "at"}
+_LEAD = {fold(w) for w in """build make create write add fix please can could you u
+i want need a an the me my some something help hi hey hello new simple small quick
+créer crée faire fais écrire écris ajouter ajoute corriger corrige construire construis
+je veux voudrais besoin un une le la les des du de mon ma mes nouveau nouvelle petit petite
+أنشئ اصنع اكتب أضف اعمل أصلح ابن أريد من فضلك هل يمكنك لي جديد جديدة بسيط صغير""".split()}
 
 
 def short_name(title: str, limit: int = 40) -> str:
     """A folder name from a job's title: 'Build a browser calculator with big
     buttons' -> 'browser-calculator-with-big-buttons'."""
-    words = re.findall(r"[a-z0-9]+", (title or "").lower())
-    while len(words) > 1 and words[0] in _LEAD:
+    words = name_words(title)
+    while len(words) > 1 and fold(words[0]) in _LEAD:
         words.pop(0)
-    kept: list[str] = []
-    for word in words:
-        if len("-".join([*kept, word])) > limit:
-            break
-        kept.append(word)
-    while len(kept) > 1 and kept[-1] in _TAIL:
+    kept = _fit(words, limit)
+    while len(kept) > 1 and fold(kept[-1]) in _TAIL:
         kept.pop()
     return "-".join(kept) or "session"
 

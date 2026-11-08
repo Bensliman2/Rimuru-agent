@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .memory import looks_secret
+from .text import fold, words
 
 MAX_NAME = 60
 MAX_WHEN = 200
@@ -39,7 +40,6 @@ MAX_TEXT = 20000
 MAX_LISTED = 30
 MAX_FILE = 200_000
 
-_SLUG = re.compile(r"[a-z0-9]+")
 
 
 @dataclass
@@ -61,11 +61,11 @@ class Skill:
 
 
 def slugify(name: str) -> str:
-    """'Our Python style!' -> 'our-python-style'. Only a-z, 0-9 and '-', so a
-    slug can never point outside the skills folder."""
-    words = _SLUG.findall(str(name or "").lower())
+    """'Our Python style!' -> 'our-python-style', and any other script stays
+    itself: 'Style café' -> 'style-cafe'. Only letters, digits and '-', so a slug
+    can never point outside the skills folder."""
     slug = ""
-    for word in words:
+    for word in words(fold(str(name or ""))):
         if len(slug) + len(word) + 1 > 48:
             break
         slug = f"{slug}-{word}" if slug else word
@@ -227,7 +227,7 @@ def for_router(skills: Iterable[Skill]) -> str:
 # ---------------------------------------------------------------------- #
 # /skill_<name>: the person forces a skill for one message
 # ---------------------------------------------------------------------- #
-_FORCE = re.compile(r"\s*/skill_([A-Za-z0-9][A-Za-z0-9_-]{0,60})(?:@\w+)?(?=\s|$)")
+_FORCE = re.compile(r"\s*/skill_([^\W_][^\s@]{0,60})(?:@\w+)?(?=\s|$)")   # a name in any script
 
 
 def command_for(skill: Skill) -> str:

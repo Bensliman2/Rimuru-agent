@@ -151,6 +151,7 @@ svg { display: block; }
 .msg .bubble {
   /* "anywhere": a long folder path wraps instead of widening the whole chat. */
   padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere;
+  unicode-bidi: plaintext; text-align: start;    /* each line reads in its own direction: Arabic right to left */
 }
 .msg .time { font-size: 11.5px; color: var(--faint); margin-top: 3px; }
 .msg.rimuru .bubble {

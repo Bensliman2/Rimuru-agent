@@ -18,6 +18,7 @@ import re
 from typing import Any, Iterable
 
 from .models import Memory
+from .text import fold, words
 
 # Keys and passwords: never written into long-term memory.
 _SECRET = re.compile(
@@ -27,31 +28,53 @@ _SECRET = re.compile(
     r"|\bxox[abpr]-[A-Za-z0-9-]{10,}"
     r"|\b\d{8,10}:[A-Za-z0-9_-]{30,}"                 # a Telegram bot token
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-    r"|\b(password|passcode|passwd|pin code|api[ _-]?key|secret key|access token|token)\b"
-    r"\s*(is|was|=|:)\s*\S+",
+    r"|\b(password|passcode|passwd|pin code|api[ _-]?key|secret key|access token|token"
+    r"|mot de passe|code pin|cle api|cle secrete|jeton"
+    r"|كلمه (?:ال)?(?:مرور|سر)|الرقم السري|رمز الدخول)\b"
+    r"\s*(is|was|est|هي|هو|=|:)\s*\S+",
     re.IGNORECASE)
 _RANDOM = re.compile(r"\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}\b")
 
-_WORD = re.compile(r"[a-z0-9][a-z0-9'-]{2,}")
-_COMMON = set("""the and for that this with you your are was were have has had not but they them
+# Words too ordinary to say what a text is about. Compared after fold().
+_COMMON = {fold(w) for w in """the and for that this with you your are was were have has had not but they them
 their there what when where which who will would can could should about into from then than
 also just like some more most very only make made want need please thanks hello okay sure
-it's i'm don't can't one two its our out all any how why did does done new get got use used""".split())
+don isn didn doesn wasn won aren couldn shouldn wouldn haven hasn weren hadn
+one two its our out all any how why did does done new get got use used
+
+les une des pour avec dans sur par pas que qui quoi mais est sont ont avoir être faire fait
+cette ces mon ton son mes tes ses nos vos leur leurs nous vous ils elles elle tout tous toute
+toutes plus moins très bien aussi comme merci bonjour salut veux voudrais peux peut
+
+إلى على هذا هذه ذلك تلك التي الذي كان كانت يكون ليس لكن أنا أنت نحن بعض غير عند بعد قبل حتى
+أريد لقد أيضا شكرا مرحبا فقط جدا كيف لماذا ماذا متى أين هناك هنا يوجد يمكن يجب""".split()}
+# "The" is written joined to an Arabic word: البيت is بيت, also after و ف ب ك ل.
+_THE = re.compile("^(?:[\u0648\u0641\u0628\u0643]?\u0627\u0644|\u0644\u0644)(?=[\u0620-\u064a]{3})")
+# Chinese and Japanese have no spaces: pairs of characters stand in for words.
+_NO_SPACES = re.compile("[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]+")
 
 ABOUT = {"you": "about the person", "session": "about this session", "general": ""}
 
 
 def looks_secret(text: str) -> bool:
-    return bool(_SECRET.search(text or "") or _RANDOM.search(text or ""))
+    return bool(_SECRET.search(fold(text)) or _RANDOM.search(text or ""))
 
 
 def _words(text: str) -> set[str]:
-    return {w for w in _WORD.findall((text or "").lower()) if w not in _COMMON}
+    """What a text is about, as words that compare, in any language."""
+    found: set[str] = set()
+    for word in words(fold(text)):
+        runs = _NO_SPACES.findall(word)
+        found |= {run[i:i + 2] for run in runs for i in range(max(len(run) - 1, 1))}
+        word = _THE.sub("", _NO_SPACES.sub("", word))
+        if len(word) >= 3 and word not in _COMMON:
+            found.add(word)
+    return found
 
 
 def same(a: str, b: str) -> bool:
-    norm = lambda t: " ".join(_WORD.findall((t or "").lower()))  # noqa: E731
-    return norm(a) == norm(b)
+    key = lambda t: " ".join(words(fold(t))) or (t or "").strip()  # noqa: E731
+    return key(a) == key(b)
 
 
 def relevant(memories: Iterable[Memory], *, text: str, session_keys: set[str],

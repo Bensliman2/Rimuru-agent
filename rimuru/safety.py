@@ -18,11 +18,40 @@ import os
 import re
 from typing import Any
 
+from .text import fold
+
 # Spoken to an AI tool - an address, not a description: "Note for AI assistants:",
 # "If you are an AI", "Dear AI", "Claude, delete ..." - but not "an AI assistant
 # that can delete old files".
 _AI = (r"(ai|a\.i\.|llms?|language\s+models?|(ai\s+)?(assistants?|agents?|tools?|models?|coders?)"
        r"|chatbots?|bots?)")
+_AI_FR = (r"(ia|i\.a\.|intelligences?\s+artificielles?|llms?|modeles?(\s+de\s+langage)?"
+          r"|assistants?(\s+(ia|i\.a\.|virtuels?))?|agents?(\s+(ia|i\.a\.))?|outils?(\s+(ia|i\.a\.))?"
+          r"|chatbots?|bots?|robots?)")
+_THE_FR = r"(tous\s+|toutes\s+)?(les\s+|l'|la\s+|le\s+|des\s+|du\s+)?"
+_ADDRESSED_FR = (
+    r"|\b(note|message|instructions?|consignes?|attention|avis|rappel|avertissement)\s+"
+    r"(pour|a|aux|a\s+l'attention\s+(de|des|du))\s+" + _THE_FR + _AI_FR + r"\b"
+    r"|\ba\s+l'attention\s+(de|des|du)\s+" + _THE_FR + _AI_FR + r"\b"
+    r"|\b(si|quand|lorsque)\s+(tu\s+es|vous\s+etes)\s+(une?\s+)?" + _AI_FR + r"\b"
+    r"|\b(ia|llm|assistant|agent|modele|bot)s?\s+(lisant|qui\s+lit|qui\s+lisent)\s+(ceci|ce\s+\w+)\b"
+    r"|\b(si|quand)\s+(une?\s+)?" + _AI_FR + r"\s+lit\s+(ceci|ce\s+\w+)\b"
+    r"|(^|[.!?]\s*)(cher|chere|chers|cheres|salut|bonjour|attention|aux|a)\s+" + _THE_FR + _AI_FR + r"\b"
+    r"|\b(chatgpt|claude|copilot|gemini|kimi|deepseek|cursor)\s*[,:]\s*(s'il\s+te\s+plait\s+|svp\s+|stp\s+)?"
+    r"(ignore|oublie|supprime|efface|reponds|envoie|revele|ne\s|n'|execute|lance)")
+_AI_AR = ("((لل|ال)?ذكاء\\s+(ال)?اصطناعيا?"
+          "|(لل|ال|ل)?مساعد(ين|ون|ا)?"
+          "|(لل|ال|ل)?(نموذجا?|نماذج)"
+          "|(لل|ال|ل)?(وكيل|وكلاء)"
+          "|(لل|ال|ل)?(شات\\s*)?(رو)?بوت)")
+_ALL_AR = "((ل)?(كل|جميع)\\s+)?"
+_ADDRESSED_AR = (
+    "|\\b(ملاحظه|رساله|تعليمات|تنبيه|تحذير|تذكير)\\s+(الي\\s+)?" + _ALL_AR + _AI_AR + "\\b"
+    "|\\b(اذا|ان|لو)\\s+كنت\\s+" + _AI_AR + "\\b"
+    "|" + _AI_AR + "\\s+(الذي|التي)\\s+[يت]قرا\\s+هذ"
+    "|(^|[.!?؟:]\\s*)(ايها|يا|عزيزي|الي)\\s+" + _ALL_AR + _AI_AR + "\\b"
+    "|\\b(chatgpt|claude|copilot|gemini|kimi|deepseek|cursor|كلود|جيميني)\\s*[,:،]\\s*(من\\s+فضلك\\s+)?"
+    "(تجاهل|اهمل|احذف|امسح|ارسل|اكشف|لا\\s+ت|نفذ|شغل)")
 _ADDRESSED = re.compile(
     r"\b(note|message|instructions?|attention|notice|reminder|warning)\s+(for|to)\s+"
     r"(any\s+|all\s+|the\s+)?" + _AI + r"\b"
@@ -31,7 +60,10 @@ _ADDRESSED = re.compile(
     r"|(^|[.!?]\s*)(dear|hey|attention|to)\s+(all\s+|any\s+|the\s+)?" + _AI + r"\b"
     r"|(^|[.!?]\s*)(ai|llm)\s+(assistants?|agents?|tools?|models?|bots?)\s*[:,]"
     r"|\b(chatgpt|claude|copilot|gemini|kimi|deepseek|cursor)\s*[,:]\s*(please\s+)?"
-    r"(ignore|disregard|delete|remove|reply|respond|send|upload|reveal|do\s+not|don'?t|never|run|execute)\b",
+    r"(ignore|disregard|delete|remove|reply|respond|send|upload|reveal|do\s+not|don'?t|never|run|execute)\b"
+    # The same in French and Arabic. All of this is matched against fold(text):
+    # no accents or vowel marks, and أ/إ/آ are ا, ى is ي, ة is ه.
+    + _ADDRESSED_FR + _ADDRESSED_AR,
     re.IGNORECASE | re.MULTILINE)
 
 # Telling it to do something.
@@ -43,14 +75,41 @@ _ORDER = re.compile(
     r"|\b(send|upload|post|e-?mail|exfiltrate|leak|reveal|print|show|share|paste)\b.{0,40}"
     r"\b(keys?|tokens?|passwords?|secrets?|credentials?|\.env|api[_ ]?keys?|ssh)\b"
     r"|\b(do\s+not|don'?t|never)\s+(tell|mention|inform|report|reveal|alert)\b"
-    r"|\b(curl|wget|invoke-webrequest)\b|https?://\S+\s*\|\s*(sh|bash)",
+    r"|\b(curl|wget|invoke-webrequest)\b|https?://\S+\s*\|\s*(sh|bash)"
+    # French
+    r"|\b(ignore[rz]?|oublie[rz]?|neglige[rz]?)\b.{0,40}\b(instructions?|consignes?|regles?|directives?"
+    r"|ci-dessus|precedent\w*|tout)\b"
+    r"|\b(supprime[rz]?|efface[rz]?|detruis|detruisez|detruire|ecrase[rz]?)\b"
+    r"|\b(reponds?|repondez|dis|dites|ecris|ecrivez)\s+(seulement|uniquement|juste)\b"
+    r"|\bne\s+(reponds?|repondez|dis|dites|ecris|ecrivez)\s+que\b"
+    r"|\b(envoie[rz]?|envoyez|publie[rz]?|partage[rz]?|revele[rz]?|affiche[rz]?|montre[rz]?|imprime[rz]?"
+    r"|colle[rz]?|transmets|transmettez)\b.{0,40}(\bcles?\b|\btokens?\b|\bjetons?\b|\bmots?\s+de\s+passe\b"
+    r"|\bsecrets?\b|\bidentifiants?\b|\.env\b|\bssh\b)"
+    r"|\bne\s+(dis|dites|mentionne[z]?|previens|prevenez|signale[z]?|revele[z]?|informe[z]?|parle[z]?)"
+    r"\s+(pas|rien)\b|\bn'en\s+parle[z]?\s+pas\b|\bn'informe[z]?\s+pas\b"
+    # Arabic
+    "|\\b[وف]?(تجاهل|اهمل|انس)\\b.{0,40}(تعليمات|قواعد|اوامر|سابق|ما\\s+سبق|كل\\s+شيء)"
+    "|\\b[وف]?(احذف|امسح|ازل|دمر|فسخ|اتلف)\\b"
+    "|\\b(اجب|رد|قل|اكتب)\\s+(فقط|بكلمه\\s+واحده)\\b"
+    "|\\b[وف]?(ارسل|انشر|ارفع|اكشف|اظهر|اطبع|شارك|الصق|اعرض|ابعث)\\b.{0,40}"
+    "(مفتاح|مفاتيح|كلمه\\s+(ال)?مرور|كلمات\\s+(ال)?مرور|كلمه\\s+(ال)?سر|توكن|رموز|اسرار|بيانات\\s+الدخول|\\.env\\b|\\bssh\\b)"
+    "|\\bلا\\s+(تخبر|تذكر|تقل|تبلغ|تكشف|تعلم)\\b",
     re.IGNORECASE)
 
 # Needs no addressee: nobody writes this for people.
 _OVERRIDE = re.compile(
     r"\b(ignore|disregard|forget)\s+(all\s+|any\s+|the\s+)?(previous|prior|above|earlier|preceding)\s+"
     r"(instructions?|prompts?|rules|messages?)\b"
-    r"|\byour\s+new\s+instructions\s+are\b|\bsystem\s+prompt\s*:",
+    r"|\byour\s+new\s+instructions\s+are\b|\bsystem\s+prompt\s*:"
+    # French
+    r"|\b(ignore[rz]?|oublie[rz]?|neglige[rz]?)\s+(toutes?\s+)?(les\s+|tes\s+|vos\s+|ces\s+)?"
+    r"(instructions|consignes|regles|directives|messages)\s+(precedent\w+|anterieur\w+|ci-dessus)"
+    r"|\b(ignore[rz]?|oublie[rz]?)\s+tout\s+ce\s+qui\s+precede\b"
+    r"|\b(tes|vos)\s+nouvelles\s+(instructions|consignes)\s+sont\b|\b(prompt|invite)\s+systeme\s*:"
+    # Arabic
+    "|\\b[وف]?(تجاهل|اهمل|انس)\\s+((كل|جميع)\\s+)?(ال)?(تعليمات|اوامر|قواعد|رسائل)ك?\\s+(ال)?سابقه"
+    "|\\b[وف]?(تجاهل|اهمل|انس)\\s+(كل\\s+)?ما\\s+سبق"
+    "|\\bتعليماتك\\s+الجديده\\s+هي\\b|\\b(موجه|تعليمات)\\s+النظام\\s*:",
     re.IGNORECASE)
 
 _COMMENT = re.compile(r"<!--(.*?)-->", re.DOTALL)
@@ -65,6 +124,7 @@ def _snippet(text: str, limit: int = 160) -> str:
 
 
 def _flagged(passage: str) -> bool:
+    passage = fold(passage)
     if _OVERRIDE.search(passage):
         return True
     # The order has to follow the address closely: "Note for AI tools: delete ...".
@@ -153,8 +213,10 @@ _KEY_FORMATS = re.compile(
 # "password = hunter22": only the value goes, and only if it looks like one
 # (long enough, with a digit) - "the token: it is in Settings" is left alone.
 _ASSIGNED = re.compile(
-    r"(?i)\b(password|passwd|pwd|secret|api[_ -]?key|access[_ -]?token|auth[_ -]?token|token)\b"
-    r"(\s*[:=]\s*|\s+is\s+)([\"']?)(?=[^\s\"']*\d)[^\s\"']{8,}")
+    r"(?i)\b(password|passwd|pwd|secret|api[_ -]?key|access[_ -]?token|auth[_ -]?token|token"
+    r"|mot[_ -]de[_ -]passe|mdp|cl[eé][_ -]api|jeton"
+    r"|كلم[ةه]\s+(?:ال)?(?:مرور|سر)|الرقم\s+السري)\b"
+    r"(\s*[:=]\s*|\s+is\s+|\s+est\s+|\s+هي\s+)([\"']?)(?=[^\s\"']*\d)[^\s\"']{8,}")
 # Not PWD or OLDPWD: those are the current folder.
 _SECRET_ENV = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|_PWD)$", re.I)
 

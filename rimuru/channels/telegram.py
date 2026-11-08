@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
@@ -28,10 +27,6 @@ log = logging.getLogger("rimuru.telegram")
 
 MAX_TEXT = 4000            # Telegram allows 4096 characters per message
 MAX_FILE = 10 * 1024 * 1024
-# Code blocks in a reply, and the words that mean the person wants code or files.
-_FENCED = re.compile(r"```.*?(?:```|$)", re.S)
-_ASKED = re.compile(r"\b(code|source|file|files|script|snippet|send|show me|paste)\b", re.I)
-LEFT_OUT = "(I left the code out - say \"send me the code\" if you want it.)"
 WELCOME = ("Hi {name}! I'm Rimuru, your assistant. Tell me what you'd like built or fixed, and I'll "
            "put one of my clones on it - I'll tell you here when it's done.\n\n"
            "/status - how your work is going\n"
@@ -46,7 +41,8 @@ class TelegramChannel:
     """Private chats: a conversation channel, like the chat page."""
 
     name = "telegram"
-    norms = ChannelNorms(register="chat", word_cap=150,
+    # On a phone, code is noise: Rimuru says what it did in plain words.
+    norms = ChannelNorms(register="chat", word_cap=150, code_on_request=True,
                          description="One person on Telegram, possibly non-technical. Plain words, short.")
 
     def __init__(self, *, token: str, settings: Any, system: Any,
@@ -169,19 +165,10 @@ class TelegramChannel:
                             disable_web_page_preview=True)
 
     async def deliver(self, thread_key: str, text: str, **who: Any) -> str:
-        # On a phone, code is noise: Rimuru says what it did in plain words. Code
-        # goes out only when the person asked for it (their last message).
-        if "```" in text and not self.asked_for_code(thread_key):
-            text = _FENCED.sub(LEFT_OUT, text).strip()
         await self.send(thread_key.removeprefix("tg-"), text)
         # The same session is in the app too: keep its chat there complete.
         self.system.store.add_chat("rimuru", text, chat=thread_key, **who)
         return text
-
-    def asked_for_code(self, thread_key: str) -> bool:
-        said = next((m["text"] for m in reversed(self.system.store.chat)
-                     if m.get("chat") == thread_key and m["role"] == "user"), "")
-        return bool(_ASKED.search(said))
 
     # ------------------------------------------------------------------ #
     async def finish(self, worker: Any, thread: Any, outcome: str, summary: str) -> str:

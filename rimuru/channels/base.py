@@ -12,6 +12,7 @@ as verified, so it is enforced here in code rather than left to the prompt.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -19,6 +20,8 @@ from typing import Any, Protocol
 from ..safety import scrubbed
 
 CHAT_WORD_CAP = 100
+_FENCED = re.compile(r"```.*?(?:```|$)", re.S)
+CODE_LEFT_OUT = "[…]"                # the elision mark: it reads the same in every language
 
 
 @dataclass
@@ -26,6 +29,7 @@ class ChannelNorms:
     register: str = "chat"           # chat | async
     word_cap: int | None = CHAT_WORD_CAP
     description: str = "Keep it short. Interrupt only for a decision or a sign-off."
+    code_on_request: bool = False    # code blocks only in a reply that says it was asked for
 
 
 ASYNC_NORMS = ChannelNorms(
@@ -90,16 +94,27 @@ class ChannelRegistry:
         channel = self.channels.get(name)
         return channel.norms if channel else ChannelNorms()
 
-    async def send(self, channel_name: str, thread_key: str, text: str, **who: Any) -> tuple[str, str]:
+    async def send(self, channel_name: str, thread_key: str, text: str, *,
+                   include_code: bool = False, **who: Any) -> tuple[str, str]:
         """Deliver a reply. Returns (what_was_sent, note_for_the_model). `who`: a
         clone speaking for itself, shown as such in the chat."""
         norms = self.norms_for(channel_name)
-        sent, note = enforce_norms(scrubbed(text), norms)   # no reply carries a key
+        text = scrubbed(text)                               # no reply carries a key
+        # Whether the person asked for code is for Rimuru to judge, in whatever
+        # language they asked: it says so with include_code.
+        left_out = norms.code_on_request and not include_code and "```" in text
+        if left_out:
+            text = _FENCED.sub(CODE_LEFT_OUT, text)
+        sent, note = enforce_norms(text, norms)
 
         message = OutboundMessage(
             ts=time.time(), channel=channel_name, thread_key=thread_key,
             text=sent, truncated=bool(note),
         )
+        if left_out:
+            note = (note + " " if note else "") + (
+                f"The code was left out and {CODE_LEFT_OUT} sent in its place: on this channel code goes "
+                f"only to someone who asked for it. If they did, reply again with include_code.")
         self.outbox.append(message)
         if len(self.outbox) > 2000:
             del self.outbox[:500]

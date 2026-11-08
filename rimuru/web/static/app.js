@@ -500,7 +500,7 @@
   function slashUpdate() {
     const v = input.value;
     if (v === "/") loadCommands();
-    const typed = /^\/([A-Za-z0-9_-]*)$/.exec(v);
+    const typed = /^\/([\p{L}\p{M}\p{N}_-]*)$/u.exec(v);
     slash.items = typed ? COMMANDS.filter((c) => c.name.startsWith(typed[1].toLowerCase())) : [];
     slash.open = slash.items.length > 0 && slash.dismissed !== v && document.activeElement === input;
     if (slash.dismissed !== null && slash.dismissed !== v) slash.dismissed = null;

@@ -194,6 +194,12 @@ class RimuruSystem:
         return (f"Rimuru: {router.label} {router.model}  |  "
                 f"clones: {worker.label} {worker.model}")
 
+    def setup_needed(self) -> bool:
+        """The first start: nothing chosen yet, so the app opens on the setup."""
+        setup = self.config.setup
+        return (not self.config.demo_forced() and not setup.models and not setup.problems
+                and self.store.setting("setup_skipped") != "1")
+
     async def apply_models(self) -> None:
         """Switch to the models now in config/models.toml, without a restart.
         Rimuru, the watchdog and the filter use them from their next turn and

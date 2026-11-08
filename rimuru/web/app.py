@@ -38,7 +38,7 @@ from .. import sessions as chats
 from ..ids import new_id
 from ..models import TERMINAL, Memory
 from ..system import RimuruSystem
-from . import friendly
+from . import first_run, friendly
 
 STATIC = Path(__file__).parent / "static"
 
@@ -296,6 +296,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             "folder": folder_info(chat) if chat is not None else None,
             "demo": overview["demo"],
             "demo_forced": system.config.demo_forced(),
+            "setup_needed": system.setup_needed(),
             "blocked": overview["blocked"],
             "quota": overview["quota"],
             "provider": overview["models"]["worker"]["provider"],
@@ -1169,6 +1170,8 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             note = (f"Saved. Rimuru now thinks with {router.model}; new clones use "
                     f"{worker.model}. Clones already working finish on their model.")
         return models_state(note)
+
+    first_run.add_routes(app, system)
 
     @app.post("/api/models/preset")
     async def use_preset(payload: dict[str, Any]) -> dict[str, Any]:

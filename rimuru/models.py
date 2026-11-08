@@ -215,7 +215,7 @@ class Job:
 class Memory:
     """Something Rimuru remembers across sessions and restarts (article s8.1):
     a lasting fact about the person, one of their sessions, or anything else.
-    The person can see, change and delete every one (Under the hood -> Memory)."""
+    The person can see, change and delete every one (the Memory button, next to the chat)."""
 
     id: str
     text: str

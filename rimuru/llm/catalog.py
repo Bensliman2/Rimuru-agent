@@ -18,16 +18,21 @@ models file can be shared or committed without leaking anything.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
 import re
+import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+from ..safety import scrubbed
+from .base import Msg, ProviderAccountError, ToolSpec
 
 ROLES = ("router", "worker", "watchdog", "filter")
 REQUIRED = ("router", "worker")
@@ -456,6 +461,80 @@ def make_client(entry: ModelEntry, *, concurrency: int = 4):
     client.max_tokens_override = entry.max_tokens
     client.provider_label = entry.label
     return client
+
+
+# The model a new key starts with: the first of these the provider offers. A guess -
+# it is tried before anything is saved, and the person can pick another.
+_SUGGEST: dict[str, tuple[str, ...]] = {
+    "kimi": ("kimi-k2", "kimi-latest", "moonshot"),
+    "anthropic": ("sonnet", "haiku", "opus"),
+    "openai": ("-mini", "gpt-5", "gpt-4"),
+    "deepseek": ("deepseek-chat", "deepseek"),
+    "groq": ("llama-3.3-70b", "llama", "qwen"),
+    "gemini": ("flash", "gemini"),
+    "mistral": ("mistral-small", "mistral-medium", "mistral-large"),
+    "openrouter": (":free",),
+    "nvidia": ("llama-3.3", "llama", "nemotron"),
+    "zai": ("flash", "glm"),
+    "cohere": ("command-r", "command"),
+}
+
+
+def suggest_model(provider: str, offered: list[str]) -> str:
+    for wanted in _SUGGEST.get(provider, ()):
+        found = [model for model in offered if wanted in model.lower()]
+        if found:
+            return max(found)            # the newest-looking of them
+    return offered[0] if offered else ""
+
+
+_HELLO = ToolSpec(name="reply", description="Send a reply to the person.",
+                  schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]})
+
+
+async def try_model(entry: ModelEntry, *, seconds: float = 60.0) -> dict[str, Any]:
+    """One small request, the way Rimuru makes them: does this model answer, and
+    can it call a tool? Everything Rimuru and its clones do goes through tools."""
+    result: dict[str, Any] = {"ok": False, "model": entry.model, "label": entry.label, "seconds": 0, "problem": ""}
+    started = time.perf_counter()
+    client = None
+    try:
+        client = await asyncio.to_thread(make_client, entry, concurrency=1)
+        if hasattr(client, "max_attempts"):
+            client.max_attempts = 2
+        answer = await asyncio.wait_for(client.complete(
+            system="You answer by calling the reply tool.",
+            messages=[Msg("user", "Say hello to the person, in one short sentence.")],
+            tools=[_HELLO], max_tokens=200, role="router"), seconds)
+        result["seconds"] = round(time.perf_counter() - started, 1)
+        if answer.tool_calls:
+            result["ok"] = True
+        else:
+            result["problem"] = ("It answered, but it cannot use tools - and everything Rimuru "
+                                 "does goes through tools. Pick another model.")
+    except asyncio.TimeoutError:
+        result["problem"] = "It did not answer within a minute."
+    except ProviderAccountError as exc:
+        result["problem"] = exc.plain() + "."
+    except Exception as exc:  # noqa: BLE001 - whatever it is, it is told as it came
+        result["problem"] = scrubbed(str(exc))[:240] or type(exc).__name__
+    finally:
+        closing = getattr(client, "aclose", None)
+        if closing is not None:
+            with contextlib.suppress(Exception):
+                await closing()
+    return result
+
+
+async def try_setup(setup: ModelSetup) -> list[dict[str, Any]]:
+    """Each model that Rimuru and the clones would use, tried once."""
+    who: dict[str, list[str]] = {}
+    for role, label in (("router", "Rimuru"), ("worker", "The clones")):
+        who.setdefault(setup.name_for(role), []).append(label)
+    names = [name for name in who if name in setup.models]
+    results = await asyncio.gather(*(try_model(setup.models[name]) for name in names))
+    return [{**result, "who": " and ".join(who[name]).replace("and The", "and the")}
+            for name, result in zip(names, results)]
 
 
 _NOT_CHAT = ("embed", "tts", "whisper", "dall-e", "image", "audio", "moderation",

@@ -9,7 +9,7 @@ was write-only. Now:
     words with it - each shown once per stretch of context, not every turn.
   - Clones get the person's preferences and their session's memories in the brief.
   - The person sees every memory being made (a line in the chat) and can read,
-    change and delete all of them (Under the hood -> Memory).
+    change and delete all of them (the Memory button, next to the chat).
   - Secrets are never kept: anything that looks like a key or a password is refused.
 """
 from __future__ import annotations

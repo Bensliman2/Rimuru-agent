@@ -97,6 +97,7 @@
   <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 3.5l1.9 5.1 5.1 1.9-5.1 1.9L11 17.5l-1.9-5.1L4 10.5l5.1-1.9z M18 14.5l.8 2.2 2.2.8-2.2.8L18 20.5l-.8-2.2-2.2-.8 2.2-.8z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5zM5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.9" fill="currentColor"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/><circle cx="19" cy="12" r="1.9" fill="currentColor"/></symbol>
   <symbol id="i-funnel" viewBox="0 0 24 24"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
 </svg>
 
@@ -116,18 +117,25 @@
       <span class="status-dot"></span><span id="status-text">Connecting</span>
       <span class="tip" id="status-tip" role="tooltip"></span>
     </span>
-    <a class="bar-btn" href="/inside" title="See how Rimuru works: what came in, what it decided, and why">
-      <svg><use href="#i-layers"/></svg><span>Under the hood</span>
-    </a>
-    <button class="bar-btn" id="connections-btn" title="Talk to Rimuru from Telegram, and let it work on GitHub">
-      <svg><use href="#i-link"/></svg><span>Connections</span>
-    </button>
-    <button class="bar-btn" id="skills-btn" title="How-tos your clones follow: your style, how you deploy, how you test">
-      <svg><use href="#i-spark"/></svg><span>Skills</span>
-    </button>
-    <button class="bar-btn" id="models-btn" title="Choose which AI does each job">
-      <svg><use href="#i-sliders"/></svg><span>Models</span>
-    </button>
+    <button class="bar-btn more-btn" id="more-btn" type="button" aria-label="More" title="More"
+            aria-haspopup="true" aria-expanded="false" aria-controls="bar-menu"><svg><use href="#i-more"/></svg></button>
+    <div class="bar-menu" id="bar-menu">
+      <a class="bar-btn" href="/inside" title="See how Rimuru works: what came in, what it decided, and why">
+        <svg><use href="#i-layers"/></svg><span>Under the hood</span>
+      </a>
+      <button class="bar-btn" id="memory-btn" title="What Rimuru remembers about you and your work">
+        <svg><use href="#i-book"/></svg><span>Memory</span>
+      </button>
+      <button class="bar-btn" id="connections-btn" title="Talk to Rimuru from Telegram, and let it work on GitHub">
+        <svg><use href="#i-link"/></svg><span>Connections</span>
+      </button>
+      <button class="bar-btn" id="skills-btn" title="How-tos your clones follow: your style, how you deploy, how you test">
+        <svg><use href="#i-spark"/></svg><span>Skills</span>
+      </button>
+      <button class="bar-btn" id="models-btn" title="Choose which AI does each job">
+        <svg><use href="#i-sliders"/></svg><span>Models</span>
+      </button>
+    </div>
     <button class="stop" id="stop" disabled title="Stop everything Rimuru is working on">
       <svg><use href="#i-stop"/></svg><span>Stop</span>
     </button>
@@ -151,6 +159,10 @@
   <div class="sessions-scrim" id="sessions-scrim" hidden></div>
 
   <section class="chat" aria-label="Conversation with Rimuru">
+    <div class="setup" id="setup" hidden>
+      <svg class="welcome-mark"><use href="#mark-rimuru"/></svg>
+      <div id="setup-body"></div>
+    </div>
     <div class="demo-banner" id="demo-banner" hidden>
       <span><b>Demo mode.</b> <span id="demo-why">No AI model is set up yet, so nothing real is built.</span></span>
       <button type="button" id="demo-setup">Choose models</button>
@@ -180,7 +192,7 @@
 
     <form class="composer" id="composer" autocomplete="off">
       <div class="slash-menu" id="slash-menu" role="listbox" aria-label="Commands" hidden></div>
-      <textarea id="input" rows="1" dir="auto" placeholder="Ask Rimuru to build, fix or explain something&hellip;"
+      <textarea id="input" rows="1" dir="auto" placeholder="Tell Rimuru what you need&hellip;"
                 aria-label="Message Rimuru"></textarea>
       <button type="submit" class="send" id="send" aria-label="Send" disabled>
         <svg><use href="#i-send"/></svg>
@@ -330,6 +342,31 @@
     <span class="set-note" id="skills-note" role="status">Each skill is a file in the skills folder - you can edit it by hand too.</span>
     <button class="ghost small" id="skills-folder" type="button">Open the folder</button>
   </footer>
+</section>
+
+<!-- what Rimuru remembers -->
+<section class="panel settings" id="memory" role="dialog" aria-modal="true" aria-labelledby="memory-title" hidden>
+  <header class="panel-head">
+    <span class="panel-mark set-mark"><svg><use href="#i-book"/></svg></span>
+    <div class="panel-titles">
+      <h2 id="memory-title">What Rimuru remembers</h2>
+      <div class="panel-sub">Lasting facts about you and your work, used by itself in later sessions.
+        Change or forget any of them. Passwords and keys are never kept.</div>
+    </div>
+    <button class="icon-btn" id="memory-close" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+  </header>
+  <div class="panel-body">
+    <form class="mem-add" id="mem-add" autocomplete="off">
+      <input id="mem-add-text" maxlength="500" dir="auto" aria-label="Something for Rimuru to remember"
+             placeholder="Tell Rimuru something to remember, for example: I like dark designs">
+      <select id="mem-add-about" aria-label="What it is about">
+        <option value="you">About me</option><option value="general">General</option>
+      </select>
+      <button class="ghost" type="submit">Remember</button>
+    </form>
+    <div id="mem-groups"><p class="set-file">Loading&hellip;</p></div>
+  </div>
+  <footer class="set-foot"><span class="set-note" id="mem-note" role="status"></span></footer>
 </section>
 
 <!-- deleting a session -->

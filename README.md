@@ -19,15 +19,18 @@ python run.py
 
 Then open **http://127.0.0.1:8800**.
 
-- **Your models.** Click **Models** in the app and choose which AI does each job:
+- **The first time.** The app asks what Rimuru should think with: a free model (no
+  account), a key you paste, or Ollama on your computer. It tries what you pick with
+  one small request and keeps it only if it answered, so setup takes about two minutes.
+- **Your models.** Later, click **Models** to choose which AI does each job:
   Rimuru itself, the clones, the watchdog and the noise filter. Kimi, Claude, OpenAI,
   DeepSeek, Ollama (on your own computer) and any OpenAI-compatible server work. Paste
   a key and **Find models** lists what it can use. Nothing about models is fixed in
   the code: the choice is saved in `config/models.toml`, which you can also edit by
   hand (`config/models.example.toml` shows every option). Keys are kept in `.env` on
-  your computer and never shown again. Until models are set up, Rimuru runs in
-  **demo mode**: it shows how everything moves, and says plainly that nothing real
-  was built.
+  your computer and never shown again. To look around first, pick the **demo** on that
+  first screen: it shows how everything moves, and says plainly that nothing real was
+  built.
 - **Free models.** No account at all: **Kilo Code** serves free models with no key
   (about 200 requests an hour). Free keys from Groq, Google Gemini, Mistral,
   OpenRouter, NVIDIA, Z AI and Cohere are one paste away in **Models** (from the list
@@ -366,6 +369,6 @@ skills/          your skills, one Markdown file each - yours, not committed (see
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           232 automated checks
+tests/           240 automated checks
 run.py           serve | bench | verify | trace | eval | speed | scale | hands
 ```

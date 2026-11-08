@@ -34,7 +34,7 @@
     .replace(/`([^`\n]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
 
-  const state = { cards: [], openId: null, panelSig: "", chatSig: "", busy: false };
+  const state = { cards: [], openId: null, panelSig: "", chatSig: "", busy: false, sessionsLimit: 60, sessionsTotal: 0 };
 
 
   /* ------------------------------------------------------------- sessions */
@@ -69,6 +69,9 @@
       </button>
       <button class="session-del" data-del="${esc(s.key)}" title="Delete this session"
         aria-label="Delete the session: ${esc(s.title)}">${icon("trash")}</button></div>`));
+    if (state.sessionsTotal > list.length) {
+      rows.push(`<button class="session-more" data-more-sessions="1">Show older sessions (${state.sessionsTotal - list.length} more)</button>`);
+    }
     $("session-list").innerHTML = rows.join("") ||
       '<p class="session-empty">Your sessions will appear here.</p>';
   }
@@ -278,6 +281,7 @@
   $("sessions-scrim").addEventListener("click", closeSessions);
   $("new-session").addEventListener("click", newSession);
   $("session-list").addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-more-sessions]")) { state.sessionsLimit += 60; refresh(); return; }
     const del = ev.target.closest("[data-del]");
     if (del) { askDelete(del.dataset.del); return; }
     const b = ev.target.closest("[data-chat]");
@@ -1385,7 +1389,8 @@
   }
   async function refresh() {
     try {
-      const list = await api("/api/chats");
+      const list = await api(`/api/chats?limit=${state.sessionsLimit}&also=${encodeURIComponent(state.chat || "")}`);
+      state.sessionsTotal = list.total;
       renderSessions(list.items);
       const w = await api(`/api/work?chat=${encodeURIComponent(state.chat || "direct")}`);
       renderStatus(w); renderClones(w); renderFolder(w.folder);
@@ -1428,6 +1433,14 @@
   // Opened ahead of time for a quick change of page: read the address when shown.
   document.addEventListener("prerenderingchange", () => { followHash(); refresh(); });
   window.addEventListener("hashchange", followHash);
-  setInterval(refresh, 4000);       // ticks elapsed times; also a fallback
+  // Ticks elapsed times while clones work, and is the safety net for live events.
+  // Slower when nothing is happening; nothing at all on a page nobody is looking at.
+  let lastRefresh = 0;
+  setInterval(() => {
+    if (document.hidden) return;
+    const every = document.querySelector(".clones .card.working") ? 4000 : 15000;
+    if (Date.now() - lastRefresh >= every) { lastRefresh = Date.now(); refresh(); }
+  }, 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   input.focus();
 })();

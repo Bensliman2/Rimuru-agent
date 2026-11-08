@@ -36,7 +36,7 @@ from .. import memory as long_memory
 from .. import persona
 from .. import sessions as chats
 from ..ids import new_id
-from ..models import Memory
+from ..models import TERMINAL, Memory
 from ..system import RimuruSystem
 from . import friendly
 
@@ -44,12 +44,6 @@ STATIC = Path(__file__).parent / "static"
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
 
-
-class _NoTask:
-    thread_id = None
-
-
-_NO_TASK = _NoTask()
 
 
 def _host_of(value: str) -> str:
@@ -188,50 +182,67 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             return Path(task.folder)
         return chats.folder_for(system.config, system.store.threads.get((task.thread_id if task else None) or ""))
 
+    folder_looks: dict[str, tuple[Any, float, tuple]] = {}
+
+    def folder_look(thread, jobs: int, working: int) -> tuple:
+        """A session's folder: where it is, whether it holds anything, whether it
+        is Rimuru's own (only that one can be deleted with the session). On disk
+        at most every few seconds per session - sooner if its work changes."""
+        key = (thread.folder, thread.rimuru_folder, jobs, working)
+        seen = folder_looks.get(thread.id)
+        if seen and seen[0] == key and time.time() - seen[1] < 10.0:
+            return seen[2]
+        folder = chats.folder_for(system.config, thread)
+        look = (folder, chats.display(folder), folder.exists() and any(folder.iterdir()),
+                chats.folder_kind(thread) in {"made", "new"} and folder.is_dir()
+                and folder.resolve().is_relative_to(system.config.sessions_dir.resolve()))
+        folder_looks[thread.id] = (key, time.time(), look)
+        return look
+
+    def last_said(thread) -> float:
+        lines = system.store.chat_of(thread.key)
+        return max(thread.last_ts, lines[-1]["ts"]) if lines else thread.last_ts
+
     @app.get("/api/chats")
-    async def list_chats() -> dict[str, Any]:
-        """The person's sessions, most recent first."""
+    async def list_chats(limit: int = 60, also: str = "") -> dict[str, Any]:
+        """The person's sessions, most recent first: the latest `limit` of them,
+        and `also` - the one open now, however old it is."""
         store = system.store
+        every = [t for t in store.threads.values() if chats.is_session(t, system.config)
+                 and (store.chat_of(t.key) or store.tasks_of(t.id))]
+        every.sort(key=last_said, reverse=True)
         items = []
-        for thread in store.threads.values():
-            if not chats.is_session(thread, system.config):
-                continue
-            said = [m for m in store.chat if m.get("chat", chats.DEFAULT) == thread.key]
-            jobs = [t for t in store.tasks.values() if t.thread_id == thread.id]
-            if not said and not jobs:
-                continue
-            folder = chats.folder_for(system.config, thread)
-            shown = chats.display(folder)
+        shown = every[:max(1, limit)]
+        shown += [t for t in every[max(1, limit):] if t.key == also]
+        for thread in shown:
+            jobs = store.tasks_of(thread.id)
+            working = sum(1 for t in jobs if t.status in {"running", "queued"})
+            folder, shown, has_files, own_folder = folder_look(thread, len(jobs), working)
             items.append({
                 "key": thread.key, "title": chats.title_of(store, thread),
                 "created_ts": thread.created_ts,
-                "last_ts": max([thread.last_ts] + [m["ts"] for m in said]),
-                "working": sum(1 for t in jobs if t.status in {"running", "queued"}),
+                "last_ts": last_said(thread),
+                "working": working,
                 "jobs": len(jobs),
                 "channel": thread.channel,
-                "folder": shown if folder.exists() and any(folder.iterdir()) else None,
+                "folder": shown if has_files else None,
                 "folder_abs": str(folder),
-                # Only Rimuru's own folder for a session can be deleted with it.
-                "own_folder": chats.folder_kind(thread) in {"made", "new"} and folder.is_dir()
-                              and folder.resolve().is_relative_to(system.config.sessions_dir.resolve()),
+                "own_folder": own_folder,
             })
-        items.sort(key=lambda c: c["last_ts"], reverse=True)
-        return {"items": items}
+        return {"items": items, "total": len(every)}
 
     @app.get("/api/chat")
     async def chat(chat: str = chats.DEFAULT) -> dict[str, Any]:
         store = system.store
-        items: list[dict[str, Any]] = [dict(m) for m in store.chat
-                                       if m.get("chat", chats.DEFAULT) == chat]
+        items: list[dict[str, Any]] = [dict(m) for m in store.chat_of(chat)]
         for item in items:
             if item.get("role") == "memory" and not item.get("forgot"):
                 # Still kept? Then it can be forgotten from here.
                 item["kept"] = item.get("memory_id") in store.memories
         # Show, inside the conversation, when Rimuru hands work to a clone and
         # when that work comes back - so the chat and the clones connect.
-        for task in store.tasks.values():
-            if not in_session(task, chat):
-                continue
+        thread = session_thread(chat)
+        for task in store.tasks_of(thread.id if thread else None):
             clone = store.sessions.get(task.worker_id or "")
             look = persona.card(clone) if clone else {}
             base = {"role": "event", "task_id": task.id, "worker_id": task.worker_id,
@@ -254,16 +265,23 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         return {"messages": items, "thinking": unanswered and (busy or age < 10)}
 
     @app.get("/api/work")
-    async def work(chat: str | None = None) -> dict[str, Any]:
-        """Every clone, each with the session it works for - or, with ?chat=, only
-        that session's, plus where that session works."""
+    async def work(chat: str | None = None, limit: int = 60) -> dict[str, Any]:
+        """Clones, each with the session it works for: those at work and the latest
+        `limit` - or, with ?chat=, all of that session's, plus where it works."""
         conv = system.config.conversation_channels
         store = system.store
         cards = []
-        for s in store.sessions_of_kind("worker"):
+        workers = store.sessions_of_kind("worker")
+        total, finished = len(workers), sum(s.status == "done" for s in workers)
+        if chat is not None:
+            thread = session_thread(chat)
+            wanted = {t.worker_id for t in store.tasks_of(thread.id if thread else None)}
+            picked = [s for s in workers if s.id in wanted]
+        else:
+            newest = sorted(workers, key=lambda s: s.created_ts, reverse=True)
+            picked = [s for i, s in enumerate(newest) if i < limit or s.status not in TERMINAL]
+        for s in picked:
             task = store.tasks.get(s.task_id or "")
-            if chat is not None and not in_session(task or _NO_TASK, chat):
-                continue
             card = friendly.worker_card(store, s, conv)
             thread = store.threads.get((task.thread_id if task else None) or "")
             card["session"] = ({"key": thread.key, "title": chats.title_of(store, thread)}
@@ -273,6 +291,8 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         overview = system.overview()
         return {
             "cards": cards,
+            "total": total,
+            "done": finished,
             "folder": folder_info(chat) if chat is not None else None,
             "demo": overview["demo"],
             "demo_forced": system.config.demo_forced(),
@@ -621,12 +641,9 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         return {"items": items, "counts": counts, "more": len(picked) > len(items)}
 
     @app.get("/api/threads")
-    async def threads() -> dict[str, Any]:
-        items = sorted(
-            (t.to_dict() for t in system.store.threads.values()),
-            key=lambda t: t["last_ts"], reverse=True,
-        )
-        return {"items": items}
+    async def threads(limit: int = 100) -> dict[str, Any]:
+        items = sorted(system.store.threads.values(), key=lambda t: t.last_ts, reverse=True)
+        return {"items": [t.to_dict() for t in items[:max(1, limit)]], "total": len(items)}
 
     @app.get("/api/tasks")
     async def tasks() -> dict[str, Any]:
@@ -648,19 +665,16 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             ]
         if task.thread_id and task.thread_id in system.store.threads:
             payload["thread"] = system.store.threads[task.thread_id].to_dict()
-        payload["jobs"] = [
-            j.to_dict() for j in system.store.jobs.values()
-            if j.session_id == task.worker_id
-        ]
+        payload["jobs"] = [j.to_dict() for j in system.store.jobs.of(task.worker_id)]
         return payload
 
     @app.get("/api/sessions")
-    async def sessions() -> dict[str, Any]:
-        items = sorted(
-            (s.to_dict() for s in system.store.sessions.values()),
-            key=lambda s: (s["kind"] != "router", s["kind"] != "watchdog", -s["created_ts"]),
-        )
-        return {"items": items}
+    async def sessions(limit: int = 200) -> dict[str, Any]:
+        """Rimuru, the watchdog, every clone at work, and the latest others."""
+        every = sorted(system.store.sessions.values(),
+                       key=lambda s: (s.kind != "router", s.kind != "watchdog", -s.created_ts))
+        picked = [s for i, s in enumerate(every) if i < limit or s.status not in TERMINAL]
+        return {"items": [{**s.to_dict(), "summary": None} for s in picked], "total": len(every)}
 
     # ------------------------------------------------------------------ #
     # Rimuru's turns, by session - and clearing them from the log
@@ -706,22 +720,20 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         return {"ok": True, "cleared": cleared}
 
     @app.get("/api/sessions/{session_id}")
-    async def session_detail(session_id: str) -> dict[str, Any]:
+    async def session_detail(session_id: str, limit: int | None = None) -> dict[str, Any]:
         session = system.store.sessions.get(session_id)
         if session is None:
             raise HTTPException(404, f"no session {session_id}")
         worker = system.pool.get(session_id)
         return {
             "session": session.to_dict(),
-            "transcript": [s.to_dict() for s in system.store.transcript(session_id)],
+            "transcript": [s.to_dict() for s in system.store.transcript(session_id, last=limit)],
+            "total": session.step_count,
             "task": (
                 system.store.tasks[session.task_id].to_dict()
                 if session.task_id and session.task_id in system.store.tasks else None
             ),
-            "jobs": [
-                j.to_dict() for j in system.store.jobs.values()
-                if j.session_id == session_id
-            ],
+            "jobs": [j.to_dict() for j in system.store.jobs.of(session_id)],
             "queued": worker.loop.inbox.qsize() if worker else (
                 system.router.loop.inbox.qsize() if session_id == "rtr_main" else 0
             ),
@@ -730,11 +742,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
 
     @app.get("/api/jobs")
     async def jobs() -> dict[str, Any]:
-        items = sorted(
-            (j.to_dict() for j in system.store.jobs.values()),
-            key=lambda j: j["started_ts"], reverse=True,
-        )
-        return {"items": items[:120]}
+        return {"items": [j.to_dict() for j in system.store.jobs.recent(120)]}
 
     @app.get("/api/outbox")
     async def outbox(limit: int = 80) -> dict[str, Any]:
@@ -757,37 +765,62 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
                               cap=system.config.inline_content_cap),
         }
 
+    @app.get("/api/settings/details")
+    async def details_setting() -> dict[str, Any]:
+        return {"days": system.keep_details_days()}
+
+    @app.post("/api/settings/details")
+    async def set_details_setting(payload: dict[str, Any]) -> dict[str, Any]:
+        """How long old jobs keep the raw detail of every step (0: for ever)."""
+        try:
+            days = int(payload.get("days"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Choose a number of days.") from None
+        if not 0 <= days <= 3650:
+            raise HTTPException(400, "Choose a number of days.")
+        system.store.set_setting("keep_details_days", str(days))
+        return {"days": days}
+
     @app.get("/api/memory")
-    async def memory() -> dict[str, Any]:
-        """Everything done, session by session: each session's clones and the job
-        each one did - so a person can follow the story without any IDs."""
+    async def memory(limit: int = 30) -> dict[str, Any]:
+        """What was done, session by session (the latest `limit` sessions): each
+        one's clones and the job each did - to follow the story without any IDs."""
         store = system.store
         conv = system.config.conversation_channels
+        every = sorted((t for t in store.threads.values() if chats.is_session(t, system.config)
+                        and (store.chat_of(t.key) or store.tasks_of(t.id))), key=last_said, reverse=True)
         groups: dict[str, dict[str, Any]] = {}
-        for thread in store.threads.values():
-            if not chats.is_session(thread, system.config):
-                continue
-            said = [m for m in store.chat if m.get("chat", chats.DEFAULT) == thread.key]
+        for thread in every[:max(1, limit)]:
             folder = chats.folder_for(system.config, thread)
             groups[thread.id] = {
-                "key": thread.key, "title": chats.title_of(store, thread), "messages": len(said),
-                "last_ts": max([thread.last_ts] + [m["ts"] for m in said]), "clones": [],
+                "key": thread.key, "title": chats.title_of(store, thread),
+                "messages": len(store.chat_of(thread.key)),
+                "last_ts": last_said(thread), "clones": [],
                 "folder": chats.display(folder) if folder.exists() else None, "folder_abs": str(folder),
             }
         other = {"key": None, "title": "Practice runs and team channels", "messages": 0, "last_ts": 0.0,
                  "clones": [], "folder": chats.display(system.config.workspace),
                  "folder_abs": str(system.config.workspace)}
-        for worker in store.sessions_of_kind("worker"):
-            card = friendly.worker_card(store, worker, conv)
+        in_chats = {t.id for t in store.threads.values() if chats.is_session(t, system.config)}
+        outside = 0
+        for worker in sorted(store.sessions_of_kind("worker"), key=lambda s: s.created_ts, reverse=True):
             task = store.tasks.get(worker.task_id or "")
-            group = groups.get((task.thread_id if task else None) or "") or other
+            thread_id = (task.thread_id if task else None) or ""
+            group = groups.get(thread_id)
+            if group is None:
+                # A session too old to be listed - or practice work, the latest of it.
+                if thread_id in in_chats or outside >= limit:
+                    continue
+                outside += 1
+                group = other
+            card = friendly.worker_card(store, worker, conv)
             group["clones"].append(card)
             group["last_ts"] = max(group["last_ts"], card["started_ts"] or 0)
         sessions = sorted((g for g in groups.values() if g["messages"] or g["clones"]),
                           key=lambda g: g["last_ts"], reverse=True)
         for group in [*sessions, other]:
             group["clones"].sort(key=lambda c: c["started_ts"] or 0)     # in the order they happened
-        return {"sessions": sessions, "other": other}
+        return {"sessions": sessions, "other": other, "total": len(every)}
 
     @app.get("/api/search")
     async def search(q: str = "", limit: int = 40) -> dict[str, Any]:
@@ -901,7 +934,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         inference time over a rolling window divided by the events decided in
         it, not one turn's latency divided by its own batch.
         """
-        steps = system.store.transcript("rtr_main")
+        steps = system.store.transcript("rtr_main", last=300)
         items = []
         for i, s in enumerate(steps):
             span = steps[max(0, i - window + 1): i + 1]
@@ -991,7 +1024,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         every = skillbook.load_all(folder)
         used: dict[str, int] = {}             # how many clones read each one
         for worker in system.store.sessions_of_kind("worker"):
-            for name in skillbook.used_names(system.store.transcript(worker.id)):
+            for name in friendly._summary(system.store, worker)["read_skills"]:
                 if (found := skillbook.match(every, name)) is not None:
                     used[found.slug] = used.get(found.slug, 0) + 1
         return {"items": [{**s.to_dict(), "used": used.get(s.slug, 0)} for s in every],

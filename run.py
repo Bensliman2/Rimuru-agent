@@ -417,7 +417,7 @@ def main() -> int:
         return module.main(sys.argv[2:])
     parser = argparse.ArgumentParser(description="Rimuru super-agent")
     parser.add_argument("command", nargs="?", default="serve",
-                        choices=["serve", "bench", "trace", "verify", "eval", "speed"])
+                        choices=["serve", "bench", "trace", "verify", "eval", "speed", "scale"])
     parser.add_argument("task", nargs="?", default=None,
                         help="trace: the task id to follow (default: the first task); "
                              "verify: the scenario to check (smoke | build)")
@@ -439,6 +439,10 @@ def main() -> int:
                         help="bench: max seconds to keep running after the last event")
     args = parser.parse_args()
 
+    if args.command == "scale":
+        from rimuru.scale_probe import main as scale_main
+
+        return scale_main()
     if args.command == "trace":
         return trace(args)
     if args.command == "verify":

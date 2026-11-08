@@ -67,7 +67,8 @@
 
   const VIEWS = ["overview", "rimuru", "clones", "watchdog", "messages", "memory", "practice"];
   const state = {
-    view: "overview", overview: null, sessions: {}, cards: [], threads: [], turns: [],
+    view: "overview", overview: null, sessions: {}, cards: [], workLimit: 60, workTotal: 0, workDone: 0,
+    threads: [], turns: [],
     events: [], clone: null, dirty: true, feedsDirty: true, connected: false,
     rulesLoaded: false,
   };
@@ -151,7 +152,7 @@
   function renderOverview(o) {
     const busy = routerBusy(o);
     const live = state.cards.filter(isLive);
-    const done = state.cards.filter((c) => c.phase === "done").length;
+    const done = state.workDone;
     const card = (view, mark, name, role, now, nowBusy, rows) => `<button class="who" data-go="${view}">
       <div class="who-head">${mark}<div><h3>${name}</h3><p>${role}</p></div></div>
       <div class="who-now${nowBusy ? " busy" : ""}">${now}</div>
@@ -205,9 +206,8 @@
       `<div class="mrow"><span class="mrole">${label}</span><span class="mmodel">${esc(o.models[r].model)}</span>
         <span class="mprov">${esc(o.models[r].provider)}</span></div>`).join(""));
     const sum = { router: [0, 0, 0], worker: [0, 0, 0], watchdog: [0, 0, 0] };
-    Object.values(state.sessions).forEach((s) => {
-      const b = sum[s.kind]; const u = s.usage || {};
-      if (b) { b[0] += u.input_tokens || 0; b[1] += u.cache_read_tokens || 0; b[2] += u.output_tokens || 0; }
+    Object.entries(o.usage_by_kind || {}).forEach(([kind, u]) => {
+      if (sum[kind]) sum[kind] = [u.input_tokens || 0, u.cache_read_tokens || 0, u.output_tokens || 0];
     });
     const total = Object.values(sum).reduce((a, b) => a + b[0], 0) || 1;
     setHTML($("cost"), [["router", "Rimuru"], ["worker", "Clones"], ["watchdog", "Watchdog"]].map(([k, label]) => {
@@ -251,7 +251,7 @@
     if (!state.clone || !cards.some((c) => c.id === state.clone)) {
       state.clone = (cards.find(isLive) || cards[0] || {}).id || null;
     }
-    $("clones-count").textContent = cards.length ? `(${cards.length})` : "";
+    $("clones-count").textContent = state.workTotal ? `(${state.workTotal})` : "";
     const row = (c) => `<button class="clone-row${c.id === state.clone ? " on" : ""}" data-clone="${esc(c.id)}">
         ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c), id: c.id, tint: c })}
         <span class="row-main"><span class="row-title"><b class="row-name">${esc(c.name)}</b> ${esc(c.title)}</span>
@@ -279,7 +279,9 @@
           <div class="mem-sub">${live(g) ? `${live(g)} working &middot; ` : ""}${n} clone${n === 1 ? "" : "s"}</div></div>
           ${g.key ? `<a class="ghost small" href="/#chat=${encodeURIComponent(g.key)}">Open in the chat</a>` : ""}</div>
         <div class="list">${rows.map(row).join("")}</div></div>`;
-    }).join("") || '<p class="muted">No clones yet. Ask Rimuru for something in the chat, or start a practice run.</p>');
+    }).join("") + (state.workTotal > cards.length
+      ? `<button class="ghost more" data-more-clones="1">Show older clones (${state.workTotal - cards.length} more)</button>` : "")
+      || '<p class="muted">No clones yet. Ask Rimuru for something in the chat, or start a practice run.</p>');
     renderThreads();
 
     const c = cards.find((x) => x.id === state.clone);
@@ -313,6 +315,7 @@
       || '<p class="muted">No conversations yet.</p>');
   }
   $("clone-list").addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-more-clones]")) { state.workLimit += 60; refresh(); return; }
     const b = ev.target.closest("[data-clone]");
     if (!b) return;
     state.clone = b.dataset.clone;
@@ -408,7 +411,14 @@
   function renderMemory() {
     if (!$("find-q").value.trim()) loadMemory();
     loadRemembered();
+    if (!state.keepDaysLoaded) {
+      state.keepDaysLoaded = true;
+      api("/api/settings/details").then((d) => { $("keep-days").value = String(d.days); }).catch(() => {});
+    }
   }
+  $("keep-days").addEventListener("change", (ev) => {
+    post("/api/settings/details", { days: Number(ev.target.value) }).catch((err) => alert(err.message));
+  });
 
   // What Rimuru remembers: every memory, grouped, each one changeable or forgettable.
   let editingMemory = null;
@@ -544,8 +554,9 @@
   }[c.phase] || c.phase);
   let memory = null;
   let pickedClone = null;
+  let memoryLimit = 30;
   async function loadMemory() {
-    try { memory = await api("/api/memory"); } catch { return; }
+    try { memory = await api(`/api/memory?limit=${memoryLimit}`); } catch { return; }
     const group = (g, other) => `<div class="mem-session${other ? " other" : ""}">
       <div class="mem-head"><div>
         <div class="mem-title">${esc(g.title)}</div>
@@ -560,10 +571,13 @@
         ${icon("chevron")}</button>`).join("")}
     </div>`;
     setHTML($("memory-tree"), memory.sessions.map((g) => group(g, false)).join("") +
-      (memory.other.clones.length ? group(memory.other, true) : "") ||
+      (memory.other.clones.length ? group(memory.other, true) : "") +
+      (memory.total > memory.sessions.length
+        ? `<button class="ghost more" data-more-memory="1">Show older sessions (${memory.total - memory.sessions.length} more)</button>` : "") ||
       '<p class="muted">Nothing yet. Start a session in the chat, and its clones appear here.</p>');
   }
   $("memory-tree").addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-more-memory]")) { memoryLimit += 30; loadMemory(); return; }
     const b = ev.target.closest("[data-clone-detail]");
     if (b) showClone(b.dataset.cloneDetail);
   });
@@ -773,7 +787,7 @@
     if (quick === t.quick) return;
     t.quick = quick;
     let d;
-    try { d = await api(`/api/sessions/${encodeURIComponent(sid)}`); }
+    try { d = await api(`/api/sessions/${encodeURIComponent(sid)}?limit=${t.limit}`); }
     catch { box.innerHTML = '<p class="muted pad">Not found.</p>'; return; }
     if (TX[boxId] !== t) return;                       // switched while loading
     const steps = d.transcript || [];
@@ -793,7 +807,7 @@
     const shown = steps.slice(-t.limit).reverse();
     parts.push(`<div class="section"><h3>Turn by turn <span class="h-note">(newest first)</span></h3>${
       shown.length ? shown.map((x) => turnHtml(x, t.open)).join("") : '<p class="muted">No turns yet.</p>'}${
-      steps.length > t.limit ? `<button class="ghost more" data-more="${boxId}">Show ${Math.min(20, steps.length - t.limit)} older turns</button>` : ""}</div>`);
+      d.total > steps.length ? `<button class="ghost more" data-more="${boxId}">Show ${Math.min(20, d.total - steps.length)} older turns</button>` : ""}</div>`);
     box.innerHTML = parts.join("");
   }
 
@@ -916,10 +930,13 @@
   async function refresh() {
     try {
       const [o, sessions, work, threads, turns] = await Promise.all([
-        api("/api/overview"), api("/api/sessions"), api("/api/work"), api("/api/threads"), api("/api/batching")]);
+        api("/api/overview"), api("/api/sessions"), api(`/api/work?limit=${state.workLimit}`),
+        api("/api/threads?limit=13"), api("/api/batching")]);
       state.overview = o;
       state.sessions = Object.fromEntries(sessions.items.map((s) => [s.id, s]));
       state.cards = work.cards;
+      state.workTotal = work.total;
+      state.workDone = work.done;
       state.threads = threads.items;
       state.turns = turns.items;
       renderView();
@@ -950,6 +967,8 @@
   // Opened ahead of time for a quick change of page: read the address when shown.
   document.addEventListener("prerenderingchange", fromHash);
   refresh();
-  setInterval(() => { if (state.dirty) { state.dirty = false; refresh(); } }, 1200);
-  setInterval(refresh, 5000);
+  // Live events say when something changed. A page nobody is looking at does nothing.
+  setInterval(() => { if (state.dirty && !document.hidden) { state.dirty = false; refresh(); } }, 2000);
+  setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 })();

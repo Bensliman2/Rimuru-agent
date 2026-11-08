@@ -11,6 +11,7 @@ import re
 import time
 from typing import Any
 from .. import persona
+from ..models import TERMINAL
 from .. import skills as skillbook
 
 PASSED_RE = re.compile(r"(\d+) passed")
@@ -76,7 +77,7 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
     if name == "read_file":
         return f"Read {path}"
     if name == "write_file":
-        return f"Wrote {path} ({_lines(str(args.get('content', '')))} lines)"
+        return f"Wrote {path} ({args.get('lines') or _lines(str(args.get('content', '')))} lines)"
     if name == "edit_file":
         return f"Edited {path}"
     if name == "start":
@@ -190,11 +191,27 @@ def _files_and_tests(steps, jobs):
     return files, edited, tests
 
 
+def _summary(store, session) -> dict[str, Any]:
+    """What a clone did, from its steps - worked out once for a finished one and
+    saved with it, so its card never needs its steps again."""
+    saved = session.summary or {}
+    if saved.get("steps") == session.step_count and saved.get("status") == session.status:
+        return saved
+    steps = store.transcript(session.id)
+    jobs = store.jobs.of(session.id)
+    files, edited, tests = _files_and_tests(steps, jobs)
+    summary = {"steps": session.step_count, "status": session.status, "files": files, "edited": sorted(edited),
+               "tests": tests, "stage": _stage(session, steps, jobs),
+               "activity": plain(_activity(session, steps, jobs)), "read_skills": skillbook.used_names(steps)}
+    if session.status in TERMINAL and not any(j.status == "running" for j in jobs):
+        store.keep_summary(session, summary)
+    return summary
+
+
 def worker_card(store, session, conversation_channels) -> dict[str, Any]:
     task = store.tasks.get(session.task_id or "")
-    steps = store.transcript(session.id)
-    jobs = [j for j in store.jobs.values() if j.session_id == session.id]
-    files, edited, tests = _files_and_tests(steps, jobs)
+    summary = _summary(store, session)
+    files, edited, tests = summary["files"], set(summary["edited"]), summary["tests"]
 
     origin = store.triggers.get(task.origin_trigger_id or "") if task else None
     thread = store.threads.get(task.thread_id or "") if task else None
@@ -213,7 +230,7 @@ def worker_card(store, session, conversation_channels) -> dict[str, Any]:
     finished = task.finished_ts if task and task.worker_id == session.id else None
     if phase in FINISHED and not finished:
         finished = session.updated_ts
-    stage = _stage(session, steps, jobs)
+    stage = summary["stage"]
     if phase in {"stopped", "failed"} and stage not in FINISHED:
         stage = phase
     return {
@@ -223,7 +240,7 @@ def worker_card(store, session, conversation_channels) -> dict[str, Any]:
         "title": (task.title if task else session.title) or "Untitled task",
         "phase": phase,
         "stage": stage,
-        "activity": plain(_activity(session, steps, jobs)),
+        "activity": summary["activity"],
         "asked_by": origin.author if origin else None,
         "from_chat": bool(thread and thread.channel in conversation_channels),
         "started_ts": started or session.created_ts,
@@ -235,9 +252,9 @@ def worker_card(store, session, conversation_channels) -> dict[str, Any]:
         "result": plain(task.result) if task and task.status in {"done", "failed"}
                   and task.worker_id == session.id else "",
         "attempt": task.attempt if task else 1,
-        "turns": len(steps),
+        "turns": session.step_count,
         # Skills it followed: the ones the person forced, then the ones it read.
-        "skills": list(dict.fromkeys([*(task.skills if task else []), *skillbook.used_names(steps)])),
+        "skills": list(dict.fromkeys([*(task.skills if task else []), *summary["read_skills"]])),
     }
 
 
@@ -245,7 +262,7 @@ def worker_stages(store, session) -> list[dict[str, Any]]:
     """Four plain steps of any job - the progress strip on the details page.
     Honest about steps that were skipped: 'Not tested' is shown, not hidden."""
     steps = store.transcript(session.id)
-    jobs = [j for j in store.jobs.values() if j.session_id == session.id]
+    jobs = store.jobs.of(session.id)
     calls = [c for st in steps for c in st.tool_calls]
     files, _edited, tests = _files_and_tests(steps, jobs)
     read = {(c.get("args") or {}).get("path") for c in calls if c["name"] == "read_file"}
@@ -306,7 +323,7 @@ def _step_kind(step) -> str:
 
 def worker_timeline(store, session) -> list[dict[str, Any]]:
     """Every step, as sentences, with the raw step kept for 'technical details'."""
-    jobs = {j.id: j for j in store.jobs.values() if j.session_id == session.id}
+    jobs = {j.id: j for j in store.jobs.of(session.id)}
     out: list[dict[str, Any]] = []
     for step in store.transcript(session.id):
         lines: list[str] = []

@@ -184,6 +184,9 @@ class Session:
     # A clone's name and persona key (rimuru/persona.py).
     name: str = ""
     persona: str = ""
+    # What a finished clone did (web/friendly.py): worked out once from its
+    # steps, so showing it never needs them again.
+    summary: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

@@ -203,7 +203,7 @@ the same plain language as the chat - one view at a time:
 | Clones | every clone with its little slime, grouped by session; pick one to see its job, its commands and every turn |
 | Watchdog | its checks and interventions, and its notes - a quiet supervisor |
 | Messages | every message that came in - your chat, Telegram, GitHub, practice runs - and what became of it, kept across restarts; and the rules for group chats, editable in plain words |
-| Memory | find anything by typing a word or two - a session, a job, a message - and everything Rimuru remembers, to change or forget |
+| Memory | find anything by typing a word or two - a session, a job, a message - and everything Rimuru remembers, to change or forget; and how long old jobs keep every detail |
 | Practice runs | scripted workloads - a busy team chat, a burst, a quiet day, two coding exercises |
 
 Five modules, each a section of the article:
@@ -270,7 +270,7 @@ Things only a real model surfaced, all fixed:
 ## For developers
 
 ```bash
-python -m pytest                          # 93 checks, including sandbox safety
+python -m pytest                          # every check, including sandbox safety
 python run.py --demo                      # no AI model at all - an offline stand-in
 python run.py bench --scenario team       # the article's 300-event workload, headless
 python run.py bench --scenario smoke --speed 1   # real-model bug fixing on your models, graded
@@ -279,6 +279,7 @@ python run.py trace --db data/rimuru.db   # one request's journey, step by step
 python run.py eval run                    # the end-to-end evaluation (docs/evaluation.md)
 python run.py speed probe                 # how fast each of your models writes
 python run.py speed run --label NAME      # three everyday requests, timed and checked (docs/speed.md)
+python run.py scale                       # restart time, memory and page refresh, up to 5,000 jobs
 ```
 
 `scenarios/` holds the simulated workloads, a small repo with real bugs, and the hidden
@@ -353,6 +354,6 @@ skills/          your skills, one Markdown file each - yours, not committed (see
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           148 automated checks
-run.py           serve | bench | verify | trace | eval | speed | hands
+tests/           157 automated checks
+run.py           serve | bench | verify | trace | eval | speed | scale | hands
 ```

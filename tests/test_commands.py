@@ -53,26 +53,7 @@ def wait_for(cond, timeout=20.0):
 
 
 # ---------------------------------------------------------------------- turns
-def no_dice(monkeypatch) -> None:
-    """The offline stand-in fails 12% of pretend commands on purpose, and now and
-    then a clone 'drifts' until the watchdog nudges it. Both are real behaviour
-    for the demo, and noise for a test that needs every job to finish."""
-    import random
-
-    from rimuru.llm import mock
-
-    original = mock.MockClient.__init__
-
-    def steady(self, *args, **kwargs):
-        original(self, *args, **kwargs)
-        self.drift = False
-
-    monkeypatch.setattr(random, "random", lambda: 0.99)
-    monkeypatch.setattr(mock.MockClient, "__init__", steady)
-
-
-def test_rimurus_turns_are_grouped_by_session_and_clearing_keeps_its_mind(tmp_path, monkeypatch):
-    no_dice(monkeypatch)
+def test_rimurus_turns_are_grouped_by_session_and_clearing_keeps_its_mind(tmp_path, monkeypatch, steady_demo):
     with app_client(tmp_path, monkeypatch) as client:
         system = client.app.state.system
         client.post("/api/message", json={"text": "Build a small page about cats", "thread_key": "s-cats0001"})
@@ -270,11 +251,10 @@ def test_status_in_the_chat_costs_no_call_to_rimuru(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------- /skill_<name>
-def test_a_forced_skill_rides_with_the_message_into_the_job(tmp_path, monkeypatch):
+def test_a_forced_skill_rides_with_the_message_into_the_job(tmp_path, monkeypatch, steady_demo):
     from rimuru.config import CONFIG
     from rimuru.context import inline_trigger
 
-    no_dice(monkeypatch)
     with app_client(tmp_path, monkeypatch) as client:
         system = client.app.state.system
         skills.save(CONFIG.skills_dir, name="Web pages", when="Building a web page",
@@ -336,8 +316,7 @@ def test_a_relayed_message_carries_the_forced_skill_to_a_working_clone(tmp_path)
 
 
 # ---------------------------------------------------------------------- Messages page
-def test_the_messages_page_is_full_after_a_restart(tmp_path, monkeypatch):
-    no_dice(monkeypatch)
+def test_the_messages_page_is_full_after_a_restart(tmp_path, monkeypatch, steady_demo):
     with app_client(tmp_path, monkeypatch) as client:
         system = client.app.state.system
         client.post("/api/message", json={"text": "Build a small page about cats", "thread_key": "s-msgs0001"})

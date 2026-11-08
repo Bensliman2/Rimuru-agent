@@ -312,7 +312,7 @@ class AgentLoop:
         self._restored_pending = None
         injected, batch_size = self._resume_input, 0
         # Continue the numbering after a restart instead of starting at 0 again.
-        step_index = len(self.store.transcript(self.session.id))
+        step_index = self.session.step_count
 
         while not self._stop.is_set():
             try:

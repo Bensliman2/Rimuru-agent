@@ -7,14 +7,20 @@ holds state anywhere else, so swapping SQLite for Postgres later is a change to
 this file alone.
 
 Reads come from the in-memory mirror (the UI polls hard), writes go to both.
+The mirror holds what stays small - sessions, jobs, messages. What grows without
+limit - every step of every clone, every command's output - is read from the
+database when someone wants it, so a restart and memory use do not grow with the
+history (StepCache, JobRecords).
 """
 from __future__ import annotations
 
 import json
 import sqlite3
 import threading
+import time
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .ids import new_id
 from .models import (
@@ -65,9 +71,119 @@ CREATE TABLE IF NOT EXISTS contexts (session_id TEXT PRIMARY KEY, ts REAL, data 
 CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, ts REAL, data TEXT);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, topic TEXT, data TEXT);
 CREATE INDEX IF NOT EXISTS steps_session ON steps(session_id, idx);
+CREATE INDEX IF NOT EXISTS steps_ts ON steps(ts);
+CREATE INDEX IF NOT EXISTS jobs_session ON jobs(session_id);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE INDEX IF NOT EXISTS triggers_thread ON triggers(thread_id);
 CREATE INDEX IF NOT EXISTS triggers_ts ON triggers(ts);
 """
+
+
+_DEFAULT_CHAT = "direct"            # the session of a line that names none (sessions.DEFAULT)
+
+
+def _lean(step: Step) -> None:
+    """A step keeps what the pages show. The whole text of a file a clone wrote
+    is on disk: here, only its beginning and how long it was. (New dicts: the
+    originals may still be part of the conversation with the model.)"""
+    calls = []
+    for call in step.tool_calls:
+        args = dict(call.get("args") or {})
+        for key in ("content", "old", "new"):
+            text = args.get(key)
+            if isinstance(text, str) and len(text) > _KEEP_IN_STEP:
+                if key == "content":
+                    args["lines"] = len(text.splitlines())
+                args[key] = text[:_KEEP_IN_STEP] + f"\n... ({len(text) - _KEEP_IN_STEP} more characters)"
+        calls.append({**call, "args": args})
+    step.tool_calls = calls
+
+
+_KEEP_IN_STEP = 1500
+
+
+def _trim_step(step: Step) -> None:
+    """An old step: enough to follow what happened, not every byte of it."""
+    step.injected = step.injected[:400]
+    step.thinking = ""
+    step.text = step.text[:400]
+    # The end of an output is what says how it went ("44 passed").
+    step.tool_results = [{**r, "output": str(r.get("output", ""))[-300:]} for r in step.tool_results]
+    step.tool_calls = [{**c, "args": {k: v[:300] if isinstance(v, str) else v for k, v in (c.get("args") or {}).items()}}
+                       for c in step.tool_calls]
+
+
+class StepCache:
+    """Each session's steps: read from the database when first wanted, and kept
+    only for the sessions used most recently. Everything is on disk the moment it
+    happens, so forgetting one here loses nothing."""
+
+    def __init__(self, load: Callable[[str], list[Step]], keep: int = 64) -> None:
+        self._load, self._keep = load, keep
+        self._lists: OrderedDict[str, list[Step]] = OrderedDict()
+
+    def peek(self, session_id: str) -> list[Step] | None:
+        return self._lists.get(session_id)
+
+    def get(self, session_id: str, default: list[Step] | None = None) -> list[Step]:
+        if session_id not in self._lists:
+            loaded = self._load(session_id)
+            if not loaded:
+                return [] if default is None else default
+            self[session_id] = loaded
+        self._lists.move_to_end(session_id)
+        return self._lists[session_id]
+
+    def __setitem__(self, session_id: str, steps: list[Step]) -> None:
+        self._lists[session_id] = steps
+        self._lists.move_to_end(session_id)
+        while len(self._lists) > self._keep:
+            self._lists.popitem(last=False)
+
+    def pop(self, session_id: str, default: Any = None) -> Any:
+        return self._lists.pop(session_id, default)
+
+
+class JobRecords:
+    """Background commands: the ones still running are in memory, and the rest -
+    with their output - are read from the database when someone wants them."""
+
+    def __init__(self, store: "Store") -> None:
+        self._store = store
+        self.running: dict[str, Job] = {}
+
+    def remember(self, job: Job) -> None:
+        if job.status == "running":
+            self.running[job.id] = job
+        else:
+            self.running.pop(job.id, None)
+
+    def get(self, job_id: str, default: Any = None) -> Any:
+        if job_id in self.running:
+            return self.running[job_id]
+        found = self._store._jobs_where("id = ?", (job_id,))
+        return found[0] if found else default
+
+    def of(self, session_id: str | None) -> list[Job]:
+        """One clone's commands, the running ones as they are right now."""
+        rows = self._store._jobs_where("session_id = ?", (session_id or "",))
+        return [self.running.get(j.id, j) for j in rows]
+
+    def recent(self, limit: int) -> list[Job]:
+        rows = self._store._jobs_where(f"1 = 1 ORDER BY started_ts DESC LIMIT {int(limit)}")
+        return [self.running.get(j.id, j) for j in rows]
+
+    def values(self) -> list[Job]:
+        return [self.running.get(j.id, j) for j in self._store._jobs_where("1 = 1")]
+
+    def __bool__(self) -> bool:
+        return bool(self.running) or bool(self._store._jobs_where("1 = 1 LIMIT 1"))
+
+    def __len__(self) -> int:
+        return len(self.values())
+
+    def pop(self, job_id: str, default: Any = None) -> Any:
+        return self.running.pop(job_id, default)
 
 
 class Store:
@@ -78,6 +194,10 @@ class Store:
         self._lock = threading.RLock()
         self._closed = False
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # A commit no longer waits for the disk each time, and reading never waits
+        # for a write. An app crash loses nothing; a power cut at most the last moments.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
 
@@ -87,8 +207,11 @@ class Store:
         self.thread_by_key: dict[str, str] = {}
         self.tasks: dict[str, Task] = {}
         self.sessions: dict[str, Session] = {}
-        self.steps: dict[str, list[Step]] = {}
-        self.jobs: dict[str, Job] = {}
+        self.steps = StepCache(self._load_steps)
+        self.jobs = JobRecords(self)
+        # Each session's jobs and messages, found without scanning everything.
+        self._tasks_by_thread: dict[str, list[Task]] = {}
+        self._chat_by_key: dict[str, list[dict[str, Any]]] = {}
 
         # Spill area (article s3.3): Triggers that passed straight through to a
         # Worker are NOT injected into the Router context, but the Router can
@@ -104,6 +227,7 @@ class Store:
         # The person's conversation with Rimuru.
         self.chat: list[dict[str, Any]] = []
         self._events_added = 0
+        self._router_recent: tuple[int, list[Step]] = (-1, [])
 
         # Reload everything that was saved. The loops are stateless (article
         # s5.1), so a restart must find the same tasks, sessions, transcripts,
@@ -125,15 +249,13 @@ class Store:
         for d in rows("SELECT data FROM tasks ORDER BY created_ts"):
             task = from_dict(Task, d)
             self.tasks[task.id] = task
+            self._index_task(task)
         for d in rows("SELECT data FROM sessions ORDER BY created_ts"):
             session = from_dict(Session, d)
             self.sessions[session.id] = session
-        for d in rows("SELECT data FROM steps ORDER BY session_id, idx"):
-            step = from_dict(Step, d)
-            self.steps.setdefault(step.session_id, []).append(step)
-        for d in rows("SELECT data FROM jobs ORDER BY started_ts"):
+        for d in rows("SELECT data FROM jobs WHERE status = 'running'"):
             job = from_dict(Job, d)
-            self.jobs[job.id] = job
+            self.jobs.running[job.id] = job
         for ts, note in self._conn.execute("SELECT ts, note FROM notes ORDER BY ts"):
             self.notes.append({"ts": ts, "note": note})
         for d in rows("SELECT data FROM memories ORDER BY ts"):
@@ -145,10 +267,13 @@ class Store:
                 self.put_memory(Memory(id=new_id("memory"), text=note["note"], about="general",
                                        created_ts=note["ts"]), quiet=True)
         self.chat.extend(rows("SELECT data FROM chat ORDER BY ts"))
+        for line in self.chat:
+            self._chat_by_key.setdefault(line.get("chat", _DEFAULT_CHAT), []).append(line)
 
     def add_chat(self, role: str, text: str, **extra: Any) -> dict[str, Any]:
         entry = {"id": new_id("step"), "ts": now(), "role": role, "text": text, **extra}
         self.chat.append(entry)
+        self._chat_by_key.setdefault(entry.get("chat", _DEFAULT_CHAT), []).append(entry)
         self._write("INSERT OR REPLACE INTO chat (id, ts, role, text, data) VALUES (?,?,?,?,?)",
                     (entry["id"], entry["ts"], role, text, json.dumps(entry)))
         if self.bus:
@@ -327,7 +452,6 @@ class Store:
     # ------------------------------------------------------------------ #
     def put_session(self, session: Session) -> Session:
         self.sessions[session.id] = session
-        self.steps.setdefault(session.id, [])
         self._persist_session(session)
         if self.bus:
             self.bus.emit("session.created", session=session.to_dict())
@@ -370,8 +494,9 @@ class Store:
     # ------------------------------------------------------------------ #
     def delete_steps(self, session_id: str, ids: set[str]) -> int:
         """Clear turns from a session's log (Under the hood -> Rimuru -> Clear)."""
-        kept = [s for s in self.steps.get(session_id, []) if s.id not in ids]
-        gone = len(self.steps.get(session_id, [])) - len(kept)
+        current = self.transcript(session_id)
+        kept = [s for s in current if s.id not in ids]
+        gone = len(current) - len(kept)
         self.steps[session_id] = kept
         self._delete("steps", "id", sorted(ids))
         if (session := self.sessions.get(session_id)) is not None:
@@ -387,10 +512,13 @@ class Store:
         )
 
     def add_step(self, step: Step) -> Step:
-        self.steps.setdefault(step.session_id, []).append(step)
+        _lean(step)
+        loaded = self.steps.peek(step.session_id)
+        if loaded is not None:
+            loaded.append(step)
         session = self.sessions.get(step.session_id)
         if session:
-            session.step_count = len(self.steps[step.session_id])
+            session.step_count += 1
             session.usage.add(step.usage)
             self._persist_session(session)
         self._write(
@@ -401,8 +529,71 @@ class Store:
             self.bus.emit("step.added", session_id=step.session_id, step=step.to_dict())
         return step
 
-    def transcript(self, session_id: str) -> list[Step]:
-        return self.steps.get(session_id, [])
+    def transcript(self, session_id: str, *, last: int | None = None) -> list[Step]:
+        """A session's steps, oldest first - or only its `last` few."""
+        if last is None:
+            return self.steps.get(session_id)
+        loaded = self.steps.peek(session_id)
+        return loaded[-last:] if loaded is not None else self._load_steps(session_id, last=last)
+
+    def _load_steps(self, session_id: str, *, last: int | None = None) -> list[Step]:
+        newest = "" if last is None else f" DESC LIMIT {int(last)}"
+        with self._lock:
+            if self._closed:
+                return []
+            rows = self._conn.execute(
+                f"SELECT data FROM steps WHERE session_id = ? ORDER BY idx{newest}", (session_id,)).fetchall()
+        steps = [from_dict(Step, json.loads(r[0])) for r in rows]
+        return steps[::-1] if last is not None else steps
+
+    def setting(self, key: str, default: str = "") -> str:
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (f"setting:{key}",)).fetchone()
+        return row[0] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self._write("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (f"setting:{key}", value))
+
+    def keep_summary(self, session: Session, summary: dict[str, Any]) -> None:
+        """What a finished clone did, saved so it never has to be worked out again."""
+        session.summary = summary
+        self._persist_session(session)
+
+    def _jobs_where(self, condition: str, args: tuple[Any, ...] = ()) -> list[Job]:
+        with self._lock:
+            if self._closed:
+                return []
+            rows = self._conn.execute(f"SELECT data FROM jobs WHERE {condition}", args).fetchall()
+        return [from_dict(Job, json.loads(r[0])) for r in rows]
+
+    def trim_old_details(self, days: int, *, batch: int = 400) -> int:
+        """Old jobs keep their summary, files and result; the raw detail of each
+        step (what it was given, its reasoning, tool output) is cut down after
+        `days`. 0 keeps everything. Only steps not trimmed before are touched."""
+        if days <= 0:
+            return 0
+        cutoff = time.time() - days * 86400
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM meta WHERE key = 'trimmed_until'").fetchone()
+        since, trimmed = float(row[0]) if row else 0.0, 0
+        while True:
+            with self._lock:
+                if self._closed:
+                    return trimmed
+                rows = self._conn.execute(
+                    "SELECT id, session_id, idx, ts, data FROM steps WHERE ts > ? AND ts <= ? ORDER BY ts LIMIT ?",
+                    (since, cutoff, batch)).fetchall()
+            if not rows:
+                break
+            for sid, session_id, idx, ts, data in rows:
+                step = from_dict(Step, json.loads(data))
+                _trim_step(step)
+                self._write("INSERT OR REPLACE INTO steps (id, session_id, idx, ts, data) VALUES (?,?,?,?,?)",
+                            (sid, session_id, idx, ts, json.dumps(step.to_dict())))
+                trimmed += 1
+            since = rows[-1][3]
+        self._write("INSERT OR REPLACE INTO meta (key, value) VALUES ('trimmed_until', ?)", (str(cutoff),))
+        return trimmed
 
     # ------------------------------------------------------------------ #
     # deleting a session for good
@@ -423,8 +614,10 @@ class Store:
         triggers = [t.id for t in self.triggers.values() if t.thread_id == thread_id]
         tasks = [t.id for t in self.tasks.values() if t.thread_id == thread_id]
         clones = [t.worker_id for t in self.tasks.values() if t.thread_id == thread_id and t.worker_id]
-        jobs = [j.id for j in self.jobs.values() if j.session_id in clones]
+        jobs = [j.id for clone in clones for j in self.jobs.of(clone)]
         chat = [m["id"] for m in self.chat if m.get("chat") == thread.key]
+        self._tasks_by_thread.pop(thread_id, None)
+        self._chat_by_key.pop(thread.key, None)
         memories = [m.id for m in self.memories.values()
                     if m.about == "session" and m.session_key == thread.key]
         for ids, mirror in ((triggers, self.triggers), (tasks, self.tasks), (jobs, self.jobs),
@@ -484,7 +677,21 @@ class Store:
     # ------------------------------------------------------------------ #
     # tasks
     # ------------------------------------------------------------------ #
+    def _index_task(self, task: Task) -> None:
+        if task.thread_id:
+            self._tasks_by_thread.setdefault(task.thread_id, []).append(task)
+
+    def tasks_of(self, thread_id: str | None) -> list[Task]:
+        """A thread's jobs, oldest first."""
+        return self._tasks_by_thread.get(thread_id or "", [])
+
+    def chat_of(self, key: str) -> list[dict[str, Any]]:
+        """A session's lines in the chat, oldest first."""
+        return self._chat_by_key.get(key, [])
+
     def put_task(self, task: Task) -> Task:
+        if task.id not in self.tasks:
+            self._index_task(task)
         self.tasks[task.id] = task
         self._persist_task(task)
         if self.bus:
@@ -515,7 +722,7 @@ class Store:
     # jobs (background tool calls)
     # ------------------------------------------------------------------ #
     def put_job(self, job: Job) -> Job:
-        self.jobs[job.id] = job
+        self.jobs.remember(job)
         self._write(
             "INSERT OR REPLACE INTO jobs (id, session_id, status, started_ts, data) "
             "VALUES (?,?,?,?,?)",
@@ -528,6 +735,7 @@ class Store:
     def update_job(self, job: Job, **changes: Any) -> Job:
         for key, value in changes.items():
             setattr(job, key, value)
+        self.jobs.remember(job)
         self._write(
             "INSERT OR REPLACE INTO jobs (id, session_id, status, started_ts, data) "
             "VALUES (?,?,?,?,?)",
@@ -543,6 +751,14 @@ class Store:
     def _requested_at(self, task: Task) -> float:
         origin = self.triggers.get(task.origin_trigger_id or "")
         return origin.ts if origin else task.created_ts
+
+    def _recent_router_steps(self) -> list[Step]:
+        """Rimuru's latest turns, re-read only when there are new ones."""
+        router = self.sessions.get("rtr_main")
+        count = router.step_count if router else 0
+        if self._router_recent[0] != count:
+            self._router_recent = (count, self.transcript("rtr_main", last=300))
+        return self._router_recent[1]
 
     def stats(self) -> dict[str, Any]:
         triggers = list(self.triggers.values())
@@ -571,8 +787,7 @@ class Store:
             idx = min(len(values) - 1, max(0, int(round((len(values) - 1) * q))))
             return values[idx]
 
-        router_steps = self.steps.get("rtr_main", [])
-        batched = [s.batch_size for s in router_steps if s.batch_size > 0]
+        batched = [s.batch_size for s in self._recent_router_steps() if s.batch_size > 0]
 
         return {
             "triggers_total": len(triggers),
@@ -591,7 +806,7 @@ class Store:
             "workers_live": len(self.live_workers()),
             "workers_queued": len(self.queued_workers()),
             "usage": total_usage.to_dict(),
-            "router_steps": len(router_steps),
+            "router_steps": router.step_count if (router := self.sessions.get("rtr_main")) else 0,
             "router_avg_batch": (sum(batched) / len(batched)) if batched else 0.0,
             "router_max_batch": max(batched) if batched else 0,
             "spill_size": len(self.router_spill),

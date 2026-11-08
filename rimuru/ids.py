@@ -30,7 +30,9 @@ def new_id(kind: str) -> str:
     prefix = PREFIXES.get(kind)
     if prefix is None:
         raise ValueError(f"unknown object kind: {kind}")
-    return f"{prefix}_{secrets.token_hex(4)}"
+    # Steps (and chat lines) number in the hundreds of thousands: at 32 bits they
+    # would collide, and a collision silently replaces the older one.
+    return f"{prefix}_{secrets.token_hex(8 if kind == 'step' else 4)}"
 
 
 def kind_of(obj_id: str) -> str | None:

@@ -13,6 +13,7 @@ and tasks.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import time
@@ -62,6 +63,9 @@ class RimuruSystem:
 
         self.bus = Bus()
         self.store = Store(self.config.db_path, bus=self.bus)
+        self._counts_cache: tuple[int, float, Any] | None = None
+        self._overview_cache: tuple[int, float, dict[str, Any]] | None = None
+        self._trimmer: asyncio.Task | None = None
         # The story so far, and from now on saved as it happens: a restart must
         # not blank the pages.
         self.bus.restore(self.store.recent_events(self.bus.history.maxlen or 2000))
@@ -310,6 +314,7 @@ class RimuruSystem:
         await self.connections.start()
         if self.hands.machines:
             await self.hands.listen()
+        self._trimmer = asyncio.create_task(self._trim_old_details(), name="trim-old-details")
         self.bus.emit(
             "system.started",
             demo=self.config.is_demo(),
@@ -399,7 +404,7 @@ class RimuruSystem:
         keys = {t.id: t.key for t in self.store.threads.values() if t.channel in conv}
         named = {f"{t.channel} {t.key}": t.key for t in self.store.threads.values() if t.channel in conv}
         out, current = [], set()
-        for step in self.store.transcript(self.router.session.id):
+        for step in self.store.transcript(self.router.session.id, last=2000):   # the page shows the latest
             blob = step.injected + json.dumps(step.tool_calls)
             found = {keys[t] for t in re.findall(r"thr_[0-9a-f]+", blob) if t in keys}
             found |= {named[m] for m in re.findall(r"(?:console|telegram) [A-Za-z0-9_-]+", blob) if m in named}
@@ -471,10 +476,9 @@ class RimuruSystem:
     def _mark_interrupted(self) -> list:
         """Loops that were running when the process died are gone. Say so in the
         records before anything starts, so nothing shows as working that isn't."""
-        for job in self.store.jobs.values():
-            if job.status == "running":
-                self.store.update_job(job, status="interrupted", finished_ts=time.time(),
-                                      result=(job.result or "") + "\n(interrupted by a restart)")
+        for job in list(self.store.jobs.running.values()):
+            self.store.update_job(job, status="interrupted", finished_ts=time.time(),
+                                  result=(job.result or "") + "\n(interrupted by a restart)")
         for session in self.store.sessions.values():
             if session.kind == "worker" and session.status not in TERMINAL:
                 session.pending_jobs = []
@@ -507,8 +511,8 @@ class RimuruSystem:
             return []
         steps = self.store.transcript(session.id)
         since = steps[-1].ts if steps else 0.0
-        return [j.command for j in self.store.jobs.values()
-                if j.session_id == session.id and (
+        return [j.command for j in self.store.jobs.of(session.id)
+                if (
                     j.status == "interrupted"
                     or (j.status == "stopped" and j.result == "stopped" and (j.finished_ts or 0) >= since))]
 
@@ -589,7 +593,26 @@ class RimuruSystem:
                    + "\n\nThe person has already been told about this in the chat."
                    if notes else ""))))
 
+    KEEP_DETAILS_DAYS = 30
+
+    def keep_details_days(self) -> int:
+        """How long a job keeps every detail of every step (0: for ever)."""
+        try:
+            return max(0, int(self.store.setting("keep_details_days", str(self.KEEP_DETAILS_DAYS))))
+        except ValueError:
+            return self.KEEP_DETAILS_DAYS
+
+    async def _trim_old_details(self) -> None:
+        """Once at start and once a day: old jobs keep their summary and result,
+        and the raw detail of each step stops taking up room."""
+        while True:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(self.store.trim_old_details, self.keep_details_days())
+            await asyncio.sleep(86400)
+
     async def stop(self) -> None:
+        if self._trimmer is not None:
+            self._trimmer.cancel()
         await self.connections.stop()
         await self.hands.stop()
         self.sim.stop()
@@ -764,8 +787,19 @@ class RimuruSystem:
         return scenario
 
     # ------------------------------------------------------------------ #
+    def _usage_by_kind(self) -> dict[str, dict[str, int]]:
+        totals: dict[str, dict[str, int]] = {}
+        for session in self.store.sessions.values():
+            row = totals.setdefault(session.kind, {"input_tokens": 0, "cache_read_tokens": 0, "output_tokens": 0})
+            for key in row:
+                row[key] += getattr(session.usage, key, 0) or 0
+        return totals
+
     def message_counts(self) -> tuple[dict[str, int], dict[str, int]]:
         """What came in and where it went, from every stored message."""
+        if self._counts_cache and self._counts_cache[0] == len(self.store.triggers) \
+                and time.time() - self._counts_cache[1] < 1.0:
+            return self._counts_cache[2]
         seen = {"seen": 0, "dropped_fast": 0, "dropped_slow": 0, "accepted": 0, "slow_calls": 0}
         went = {"passthrough": 0, "to_router": 0, "direct": 0}
         for t in self.store.triggers.values():
@@ -784,9 +818,20 @@ class RimuruSystem:
                 went["to_router"] += 1
             if t.kind == "human_direct":
                 went["direct"] += 1
+        self._counts_cache = (len(self.store.triggers), time.time(), (seen, went))
         return seen, went
 
     def overview(self) -> dict[str, Any]:
+        """Everything the pages' headers need. Adding it all up has a cost that grows
+        with the history, so it is done again only when something has happened."""
+        cached = self._overview_cache
+        if cached and cached[0] == self.bus._seq and time.time() - cached[1] < 1.0:
+            return cached[2]
+        result = self._compute_overview()
+        self._overview_cache = (self.bus._seq, time.time(), result)
+        return result
+
+    def _compute_overview(self) -> dict[str, Any]:
         stats = self.store.stats()
         uptime = (time.time() - self.started_ts) if self.started_ts else 0.0
         return {
@@ -813,6 +858,8 @@ class RimuruSystem:
                       "detail": self.shell.describe()},
             "max_workers": self.config.max_workers,
             "store": stats,
+            # Tokens by who used them, added up here so no page needs every session.
+            "usage_by_kind": self._usage_by_kind(),
             # Counted from the stored messages: a restart no longer empties "What came in".
             "filter": self.message_counts()[0],
             "routing": {**self.message_counts()[1], "handbacks": self.pool.handbacks},

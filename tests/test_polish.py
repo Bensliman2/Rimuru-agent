@@ -62,7 +62,7 @@ def test_clones_have_names_and_personas_that_stay_theirs(tmp_path):
     assert asyncio.run(again()) == name, "a clone keeps its name after a restart"
 
 
-def test_deleting_a_session_forgets_it_everywhere_and_files_only_when_asked(tmp_path):
+def test_deleting_a_session_forgets_it_everywhere_and_files_only_when_asked(tmp_path, steady_demo):
     async def run():
         system = make_system(tmp_path)
         store = system.store

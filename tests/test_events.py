@@ -36,23 +36,7 @@ def story(system) -> list[dict]:
     return system.bus.recent(2000, topics=set(STORY))
 
 
-def steady(monkeypatch) -> None:
-    import random
-
-    from rimuru.llm import mock
-
-    original = mock.MockClient.__init__
-
-    def init(self, *args, **kwargs):
-        original(self, *args, **kwargs)
-        self.drift = False
-
-    monkeypatch.setattr(random, "random", lambda: 0.99)
-    monkeypatch.setattr(mock.MockClient, "__init__", init)
-
-
-def test_the_story_survives_a_restart_and_goes_with_its_session(tmp_path, monkeypatch):
-    steady(monkeypatch)
+def test_the_story_survives_a_restart_and_goes_with_its_session(tmp_path, monkeypatch, steady_demo):
     with app_client(tmp_path, monkeypatch) as client:
         system = client.app.state.system
         client.post("/api/message", json={"text": "Build a small page about cats", "thread_key": "s-cats0001"})

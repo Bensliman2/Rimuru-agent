@@ -336,8 +336,9 @@ What each of the old limits is now, and what is still true:
 - **The app's own words are in English:** the buttons, `/status`, the Telegram welcome.
   Rimuru and its clones answer in your language, and names, memory and safety checks
   work in any language - with extra care for French and Arabic.
-- **When a free AI service's limit runs out,** Rimuru keeps retrying quietly, and the
-  person is not yet told why it went silent (found in the user test).
+- **A free service's limit is known only for Kilo:** at 80% of its hourly requests Rimuru
+  says so in the chat. When any free limit runs out, the work waits and carries on by
+  itself, without saying why.
 
 ## Layout
 
@@ -376,6 +377,6 @@ skills/          your skills, one Markdown file each - yours, not committed (see
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           240 automated checks
+tests/           280 automated checks
 run.py           serve | bench | verify | trace | eval | speed | scale | hands
 ```

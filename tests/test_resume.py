@@ -109,7 +109,7 @@ def test_a_crash_resumes_the_same_clone_exactly_where_it_stopped(tmp_path, monke
                                              if isinstance(b, dict)) for m in seen)
     assert "RESUMED AFTER A RESTART" in text and "Cut off" not in text
     assert any("exactly where I left off" in s for s in said)
-    assert contexts.get(worker) is None, "a finished job's conversation is not kept"
+    assert contexts.get(worker), "kept for a while, for a follow-up (tests/test_followups.py)"
 
 
 def test_a_tool_cut_off_by_the_restart_is_marked_as_such(tmp_path, monkeypatch):

@@ -90,8 +90,9 @@ class ChannelRegistry:
         channel = self.channels.get(name)
         return channel.norms if channel else ChannelNorms()
 
-    async def send(self, channel_name: str, thread_key: str, text: str) -> tuple[str, str]:
-        """Deliver a reply. Returns (what_was_sent, note_for_the_model)."""
+    async def send(self, channel_name: str, thread_key: str, text: str, **who: Any) -> tuple[str, str]:
+        """Deliver a reply. Returns (what_was_sent, note_for_the_model). `who`: a
+        clone speaking for itself, shown as such in the chat."""
         norms = self.norms_for(channel_name)
         sent, note = enforce_norms(scrubbed(text), norms)   # no reply carries a key
 
@@ -106,7 +107,7 @@ class ChannelRegistry:
         channel = self.channels.get(channel_name)
         if channel is not None:
             try:
-                await channel.deliver(thread_key, sent)
+                await channel.deliver(thread_key, sent, **who)
             except Exception as exc:
                 note = (note + " " if note else "") + f"delivery failed: {exc}"
 
@@ -131,8 +132,8 @@ class ConsoleChannel:
         self.bus = bus
         self.store = store
 
-    async def deliver(self, thread_key: str, text: str) -> str:
+    async def deliver(self, thread_key: str, text: str, **who: Any) -> str:
         if self.store is not None:
-            self.store.add_chat("rimuru", text, chat=thread_key)
+            self.store.add_chat("rimuru", text, chat=thread_key, **who)
         self.bus.emit("console.message", thread_key=thread_key, text=text)
         return text

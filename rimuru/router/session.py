@@ -110,6 +110,9 @@ THE DIRECT CHAT (channel "console" - and "telegram", the same person on their ph
     one session's work into another unless the person does.
   - Each clone has a name (it comes with the dispatch result). Telling the
     person who is on it is fine - "Mika is on it" - and keeps it personal.
+  - When a job from this chat finishes, its clone usually tells the person itself,
+    and you get a note saying so: do not repeat it. A job you dispatch soon after
+    goes to that same clone (it remembers the work) unless you pass fresh.
   - On Telegram (their phone): never paste code or file contents into a reply.
     Just do the job, then say in plain words what was done and how to use it.
     Only when they ask for the files or the code, call send_files.
@@ -272,6 +275,9 @@ class RouterAgent:
                 thread_id=s("Thread ID the request came from (thr_...), if any", optional=True),
                 speculative=s("'true' to work in the background without telling anyone, "
                               "and surface a result only if it succeeds", optional=True),
+                fresh=s("'true' for a new clone even though one just finished in this session "
+                        "(by default that clone carries on: it remembers the work). Only when "
+                        "the new job has nothing to do with what it did.", optional=True),
             ),
             self._tool_dispatch,
         )
@@ -375,6 +381,7 @@ class RouterAgent:
         brief = str(args.get("brief") or "").strip()
         thread_id = str(args.get("thread_id") or "").strip() or None
         speculative = str(args.get("speculative") or "").lower() in {"true", "yes", "1"}
+        fresh = str(args.get("fresh") or "").lower() in {"true", "yes", "1"}
 
         if thread_id and thread_id not in self.store.threads:
             thread_id = None
@@ -409,8 +416,11 @@ class RouterAgent:
             skills=forced,
         ))
         try:
+            # A job on the heels of the last one in this session goes to the clone
+            # that just finished it: it remembers the work and need not rediscover it.
+            warm = None if speculative or fresh else self.pool.warm_clone(thread_id)
             worker, started = await self.pool.submit(
-                task, thread_id=thread_id, speculative=speculative
+                task, thread_id=thread_id, speculative=speculative, continue_from=warm
             )
         except Exception as exc:  # noqa: BLE001 - e.g. the repository could not be copied
             self.store.update_task(task, status="failed", finished_ts=time.time(),
@@ -427,9 +437,10 @@ class RouterAgent:
         when = ("It is running now." if started else
                 f"All {self.config.max_workers} worker slots are busy, so it is queued "
                 f"and starts when one frees up.")
+        again = " It is the same clone that just finished here, and it remembers that work." if warm else ""
         return (
             f'Dispatched {mode}: {task.id} "{title}" -> worker {worker.id}, a clone named '
-            f"{worker.name or 'without a name'}{sub}. {when}\n"
+            f"{worker.name or 'without a name'}{sub}.{again} {when}\n"
             f"Follow-up events on that thread now reach the worker directly. "
             f"It will report back to you when it has a conclusion."
         )

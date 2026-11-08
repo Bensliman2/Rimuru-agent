@@ -72,7 +72,8 @@ FILES ARE SHARED
 FINISHING
   finish() ends the session. Call it once, with an honest summary: what you did,
   what you verified, and anything you could not confirm. If you failed, say so
-  with outcome=failed rather than dressing it up.
+  with outcome=failed rather than dressing it up. For a job from a person's chat,
+  also pass for_person: the message they will read, straight from you.
 """
 
 NO_SHELL_NOTE = """
@@ -153,8 +154,10 @@ class WorkerAgent:
         files: Any = None,
         where: str | None = None,
         guide: str = "",
+        handoff: str = "",
         skills: list[Any] | None = None,
         forced: list[Any] | None = None,
+        continues: bool = False,
     ) -> None:
         self.task = task
         # Skills the person forced for this job (/skill_<name>): in full, in the brief.
@@ -214,13 +217,15 @@ class WorkerAgent:
             # truncate the JSON mid-file and break the call.
             max_tokens=config.worker_max_tokens,
         )
+        self.loop.on_turn_end = self._after_turn
+        self._finish_reminders = 0
 
         if restore is not None:
             # Resumed after a restart: its own conversation, exactly as it was, and
             # a note on what the restart cut off. No new brief, no summary.
             self.loop.restore(restore)
-            self.loop.inject(resume_note or "The app restarted; carry on where you were.",
-                             kind="system")
+            self.loop.inject((resume_note or "The app restarted; carry on where you were.")
+                             + (self.finish_note() if continues else ""), kind="system")
             return
 
         # The brief goes into the inbox now, at construction, not at launch. A
@@ -256,12 +261,27 @@ class WorkerAgent:
         others = [sk for sk in self.skills if sk.slug not in {f.slug for f in self.forced}]
         if others:
             brief += skillbook.for_brief(others)
+        if handoff:
+            brief += handoff
         if memories:
             brief += memories.rstrip() + "\n\n"
         if resume_note:
             brief += resume_note.rstrip() + "\n\n"
-        brief += "Begin."
+        brief += self.finish_note() + "Begin."
         self.loop.inject(brief, kind="system")
+
+    def finish_note(self) -> str:
+        """For a job from a person's chat: how its last message reaches them."""
+        thread = self.store.threads.get(self.task.thread_id or "")
+        if self.speculative or thread is None or thread.channel not in self.config.conversation_channels:
+            return ""
+        origin = self.store.triggers.get(self.task.origin_trigger_id or "")
+        wrote = " ".join((origin.content if origin else "").split())[:300]
+        language = (f'Write it in the SAME LANGUAGE as their message, which was: "{wrote}". ' if wrote else
+                    "Write it in the same language the person writes in. ")
+        return ("WHEN YOU FINISH: pass for_person to finish(). It goes straight to the person, from you. "
+                + language + "Two or three short, friendly sentences: what they now have and how to use "
+                "it - or, if it failed, what went wrong. No code, no internal IDs.\n\n")
 
     # ------------------------------------------------------------------ #
     def start(self) -> None:
@@ -313,6 +333,11 @@ class WorkerAgent:
             "End this task. Call it exactly once. The session stops afterwards.",
             obj(
                 summary=s("What you did, what you verified, what you could not confirm"),
+                for_person=s("Only for a job from a person's chat: the message they will read, straight "
+                             "from you, in the same language as their message. Two or three short "
+                             "friendly sentences: what they now have and how to use it - or what went "
+                             "wrong. No code, no IDs.",
+                             optional=True),
                 outcome=enum("How it ended",
                              ["done", "failed", "cancelled", "discarded"]),
             ),
@@ -495,10 +520,37 @@ class WorkerAgent:
         await self.on_report(self, status, text)
         return "Reported to the Router."
 
+    async def _after_turn(self, text: str) -> None:
+        """The model stopped without calling a tool. Found with a real free model:
+        it wrote its summary as plain text and never called finish(), so nothing
+        would ever wake it again and the job looked stuck for good."""
+        if self.session.pending_jobs or self._waiting_for_a_person():
+            return                                   # a result, or an answer, will wake it
+        if self._finish_reminders < 2:
+            self._finish_reminders += 1
+            self.loop.inject(
+                "You ended your turn without calling a tool, and nothing is running, so nothing will "
+                "wake you again. If the job is done, call finish() now"
+                + (" with for_person" if self.finish_note() else "")
+                + ". If it is not, carry on with your next step.", kind="system")
+            return
+        # Told twice: its own words are the report, rather than a job that never ends.
+        words = text.strip() or "The clone stopped without saying what it did."
+        await self._tool_finish({"summary": words, "outcome": "done",
+                                 "for_person": words if self.finish_note() else ""}, self.loop)
+
+    def _waiting_for_a_person(self) -> bool:
+        """It told Rimuru it is blocked or needs a decision, and now waits."""
+        steps = self.store.transcript(self.session.id, last=2)
+        return len(steps) == 2 and any(
+            call["name"] == "report" and (call.get("args") or {}).get("status") in {"blocked", "needs_decision"}
+            for call in steps[0].tool_calls)
+
     async def _tool_finish(self, args: dict[str, Any], loop: AgentLoop) -> str:
         summary = self._real_paths(str(args.get("summary") or "").strip())
         outcome = str(args.get("outcome") or "done")
-        await self.on_finish(self, outcome, summary)
+        for_person = self._real_paths(str(args.get("for_person") or "").strip())
+        await self.on_finish(self, outcome, summary, for_person)
         loop.request_stop(status="done")
         return f"Task closed as {outcome}."
 

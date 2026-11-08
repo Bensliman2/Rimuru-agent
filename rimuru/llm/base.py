@@ -7,6 +7,8 @@ architecture.
 """
 from __future__ import annotations
 
+import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -68,6 +70,28 @@ class LLMClient(Protocol):
         role: str = "worker",
     ) -> LLMResponse:
         ...
+
+
+class RequestMeter:
+    """How many requests went to each service in the last hour - free plans have
+    a limit, and the person should hear before they hit it."""
+
+    def __init__(self) -> None:
+        self._calls: dict[str, deque[float]] = {}
+
+    def note(self, service: str) -> None:
+        self._calls.setdefault(service.rstrip("/"), deque()).append(time.time())
+
+    def used(self, service: str, within: float = 3600.0) -> int:
+        calls = self._calls.get(service.rstrip("/"))
+        if not calls:
+            return 0
+        while calls and calls[0] < time.time() - within:
+            calls.popleft()
+        return len(calls)
+
+
+METER = RequestMeter()
 
 
 class ProviderAccountError(RuntimeError):

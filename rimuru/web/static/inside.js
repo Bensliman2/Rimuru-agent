@@ -256,6 +256,7 @@
         ${slime({ badge: BADGE[c.stage], mood: c.stage, size: "sm", still: !isLive(c), id: c.id, tint: c })}
         <span class="row-main"><span class="row-title"><b class="row-name">${esc(c.name)}</b> ${esc(c.title)}</span>
           <span class="row-sub">${esc(DOING[c.stage] || c.activity)} &middot; ${ago(c.elapsed)}${
+            c.turns ? ` &middot; ${c.turns} AI call${c.turns === 1 ? "" : "s"}` : ""}${
             c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</span></span></button>`;
     // Grouped by the session each clone works for - the busiest, most recent
     // session first - and work from no session (practice runs, team channels) last.
@@ -296,6 +297,7 @@
         <div><h2>${esc(c.name)} &middot; ${esc(c.title)}</h2>
           <p class="persona-line">${esc(c.persona)} - ${esc(c.persona_line)}</p>
           <p class="muted">${esc(DOING[c.stage] || c.activity)} &middot; ${ago(c.elapsed)}${model ? ` &middot; ${esc(model)}` : ""}${
+            c.turns ? ` &middot; ${c.turns} AI calls, ${num(c.tokens || 0)} tokens` : ""}${
             c.files.length ? ` &middot; changed ${c.files.length} file${c.files.length > 1 ? "s" : ""}` : ""}${
             c.tests ? ` &middot; tests: ${esc(c.tests)}` : ""}</p></div>
       </div>`);

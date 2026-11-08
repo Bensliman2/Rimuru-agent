@@ -56,6 +56,7 @@ class Provider:
     key_aliases: tuple[str, ...] = ()
     reasoning: bool = False       # send reasoning back on later turns of a tool loop
     hint: str = ""
+    hourly: int = 0               # a free plan's requests per hour, when known
 
 
 PROVIDERS: dict[str, Provider] = {p.id: p for p in (
@@ -75,7 +76,8 @@ PROVIDERS: dict[str, Provider] = {p.id: p for p in (
     # limited, and several may keep or log what you send: nothing confidential.
     Provider("kilo", "Kilo Code (free, no key)", "openai", "https://api.kilo.ai/api/gateway",
              hint="Free models with no account and no key, about 200 requests an hour. Pick a "
-                  "model ending in :free. Prompts may be logged - send nothing confidential."),
+                  "model ending in :free. Prompts may be logged - send nothing confidential.",
+             hourly=200),
     Provider("groq", "Groq (free tier)", "openai", "https://api.groq.com/openai/v1", "GROQ_API_KEY",
              hint="Very fast. A free key from console.groq.com/keys - no credit card; "
                   "about 30 requests a minute and 1,000 a day."),
@@ -299,6 +301,35 @@ def save(setup: ModelSetup) -> None:
     tmp.replace(setup.path)
 
 
+# Ready-made setups: a quick model for Rimuru (it routes and talks, so its speed
+# is what you feel) and a stronger one for the clones (they do the work).
+PRESETS: dict[str, dict[str, str]] = {
+    "free": {"label": "Free and fast", "provider": "kilo",
+             "about": "No account, no key. A quick model for Rimuru and a stronger one for the clones. "
+                      "Free services may log what you send, so nothing confidential.",
+             "router": "cohere/north-mini-code:free", "worker": "stealth/glyph-cluster"},
+}
+
+
+async def apply_preset(setup: ModelSetup, preset_id: str) -> ModelSetup:
+    """Use a preset: its models are added to the ones you have, and take the jobs.
+    Free models come and go, so it first checks they are still offered."""
+    preset = PRESETS.get(preset_id)
+    if preset is None:
+        raise ValueError("There is no such preset.")
+    try:
+        _url, offered = await list_models(preset["provider"])
+    except (ValueError, RuntimeError) as exc:
+        raise ValueError(f"Could not reach {PROVIDERS[preset['provider']].label}: {exc}") from None
+    gone = [preset[role] for role in ("router", "worker") if preset[role] not in offered]
+    if gone:
+        raise ValueError(f"{', '.join(gone)} is no longer offered. Pick another with Add a model.")
+    setup.models["preset-rimuru"] = ModelEntry(name="preset-rimuru", provider=preset["provider"], model=preset["router"])
+    setup.models["preset-clones"] = ModelEntry(name="preset-clones", provider=preset["provider"], model=preset["worker"])
+    setup.roles = {"router": "preset-rimuru", "worker": "preset-clones"}
+    return setup
+
+
 def from_request(path: Path, body: dict[str, Any]) -> ModelSetup:
     """Build a setup from what the Models panel sends. Raises ValueError with a
     message fit to show the person."""
@@ -494,6 +525,8 @@ def describe(setup: ModelSetup, *, demo_forced: bool, root: Path | None = None) 
         "demo_forced": demo_forced,
         "problems": problems,
         "roles": {r: setup.roles.get(r, "") for r in ROLES},
+        "presets": [{"id": k, "label": v["label"], "about": v["about"], "router": v["router"], "worker": v["worker"]}
+                    for k, v in PRESETS.items()],
         "role_info": [{"id": r, "label": ROLE_INFO[r][0], "hint": ROLE_INFO[r][1],
                        "required": r in REQUIRED} for r in ROLES],
         "active": active,

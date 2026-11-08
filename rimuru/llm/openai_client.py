@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 
 from ..models import Usage
-from .base import LLMClient, LLMResponse, Msg, ProviderAccountError, ToolCall, ToolSpec, account_problem
+from .base import METER, LLMClient, LLMResponse, Msg, ProviderAccountError, ToolCall, ToolSpec, account_problem
 
 _GATES: dict[tuple[int, int], asyncio.Semaphore] = {}
 log = logging.getLogger("rimuru.llm")
@@ -157,6 +157,7 @@ class OpenAICompatClient(LLMClient):
             backoff = min(20.0, 1.5 * (2 ** attempt)) + random.uniform(0, 0.5)
             try:
                 async with _gate(self.concurrency, self.base_url):
+                    METER.note(self.base_url)
                     response = await self._http().post(
                         f"{self.base_url}/chat/completions", json=payload, headers=headers
                     )
@@ -216,6 +217,7 @@ class OpenAICompatClient(LLMClient):
             status, text, retry_after = 0, "", ""
             try:
                 async with _gate(self.concurrency, self.base_url):
+                    METER.note(self.base_url)
                     async with self._http().stream("POST", f"{self.base_url}/chat/completions",
                                                    json=body, headers=headers) as response:
                         if response.status_code < 400:

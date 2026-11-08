@@ -102,6 +102,18 @@ Linux, files clones make in `projects/` belong to root.
   (typing `/` lists them). Turn one off to keep it
   without using it; a clone's details show which of your skills it used. Skills are
   instructions, not code: they give a clone no new powers. Keep passwords and keys out.
+- **The clone tells you itself.** When a job from your chat is done, the clone that did
+  it writes you the message - in your language, with what you now have and how to use
+  it. That saves a call to the AI and its wait; Rimuru just gets a note.
+- **Follow-ups go to the same clone.** A new job within 10 minutes of the last one in a
+  session goes to the clone that just finished it, which remembers the work instead of
+  rediscovering it (measured on free models: 15 seconds and 2 AI calls, against 103
+  seconds and 5 for a new clone). After that, a new clone starts - and it is told what
+  the earlier ones did. Each clone's card shows how many AI calls and tokens its job took.
+- **Before the free limit, not after.** On a free plan with a known limit, the status at
+  the top counts this hour's requests, and Rimuru says so in the chat when you are close.
+  **Models** has a ready-made free setup: a quick model for Rimuru, a stronger one for
+  the clones, in one click.
 - **Every clone has a name, a persona and a color** - Mika the amber one, Dax the mint
   one - and the clones working side by side never share a color.
 - **Rimuru remembers.** It keeps lasting facts by itself - about you, about each
@@ -354,6 +366,6 @@ skills/          your skills, one Markdown file each - yours, not committed (see
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           157 automated checks
+tests/           175 automated checks
 run.py           serve | bench | verify | trace | eval | speed | scale | hands
 ```

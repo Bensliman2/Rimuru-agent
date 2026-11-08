@@ -168,14 +168,14 @@ class TelegramChannel:
             await self.call("sendMessage", chat_id=chat_id, text=text[start:start + MAX_TEXT],
                             disable_web_page_preview=True)
 
-    async def deliver(self, thread_key: str, text: str) -> str:
+    async def deliver(self, thread_key: str, text: str, **who: Any) -> str:
         # On a phone, code is noise: Rimuru says what it did in plain words. Code
         # goes out only when the person asked for it (their last message).
         if "```" in text and not self.asked_for_code(thread_key):
             text = _FENCED.sub(LEFT_OUT, text).strip()
         await self.send(thread_key.removeprefix("tg-"), text)
         # The same session is in the app too: keep its chat there complete.
-        self.system.store.add_chat("rimuru", text, chat=thread_key)
+        self.system.store.add_chat("rimuru", text, chat=thread_key, **who)
         return text
 
     def asked_for_code(self, thread_key: str) -> bool:

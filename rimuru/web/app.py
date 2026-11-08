@@ -297,6 +297,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             "demo": overview["demo"],
             "demo_forced": system.config.demo_forced(),
             "blocked": overview["blocked"],
+            "quota": overview["quota"],
             "provider": overview["models"]["worker"]["provider"],
             "model": overview["models"]["worker"]["model"],
             "shell": overview["shell"],
@@ -1168,6 +1169,18 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             note = (f"Saved. Rimuru now thinks with {router.model}; new clones use "
                     f"{worker.model}. Clones already working finish on their model.")
         return models_state(note)
+
+    @app.post("/api/models/preset")
+    async def use_preset(payload: dict[str, Any]) -> dict[str, Any]:
+        """A ready-made setup, in one click."""
+        try:
+            setup = await catalog.apply_preset(system.config.setup, str(payload.get("id") or ""))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        catalog.save(setup)
+        await system.apply_models()
+        return models_state(f"Saved. Rimuru now thinks with {setup.entry_for('router').model}; new clones use "
+                            f"{setup.entry_for('worker').model}.")
 
     @app.post("/api/models/find")
     async def find_models(payload: dict[str, Any]) -> dict[str, Any]:

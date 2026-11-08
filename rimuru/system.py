@@ -31,7 +31,7 @@ from .channels.sim import GitHubSimChannel, ImSimChannel, SimRunner
 from .config import CONFIG, Config
 from .ids import new_id
 from .llm import build_client, catalog
-from .llm.base import Msg
+from .llm.base import METER, Msg
 from .models import TERMINAL, Task, Trigger
 from .recall import describe_graph
 from .connections import Connections
@@ -66,6 +66,8 @@ class RimuruSystem:
         self._counts_cache: tuple[int, float, Any] | None = None
         self._overview_cache: tuple[int, float, dict[str, Any]] | None = None
         self._trimmer: asyncio.Task | None = None
+        self._minder: asyncio.Task | None = None
+        self._quota_told: dict[str, float] = {}
         # The story so far, and from now on saved as it happens: a restart must
         # not blank the pages.
         self.bus.restore(self.store.recent_events(self.bus.history.maxlen or 2000))
@@ -315,6 +317,7 @@ class RimuruSystem:
         if self.hands.machines:
             await self.hands.listen()
         self._trimmer = asyncio.create_task(self._trim_old_details(), name="trim-old-details")
+        self._minder = asyncio.create_task(self._every_minute(), name="every-minute")
         self.bus.emit(
             "system.started",
             demo=self.config.is_demo(),
@@ -593,6 +596,45 @@ class RimuruSystem:
                    + "\n\nThe person has already been told about this in the chat."
                    if notes else ""))))
 
+    def quota(self) -> list[dict[str, Any]]:
+        """Free plans with a known hourly limit, and how much this hour has used."""
+        if self.config.is_demo() or self.config.setup is None:
+            return []
+        out, seen = [], set()
+        for role in ("router", "worker", "watchdog", "filter"):
+            entry = self.config.setup.entry_for(role)
+            provider = catalog.PROVIDERS.get(entry.provider)
+            if provider is None or not provider.hourly or provider.id in seen:
+                continue
+            seen.add(provider.id)
+            out.append({"provider": provider.label, "limit": provider.hourly,
+                        "used": METER.used(entry.base_url or provider.base_url)})
+        return out
+
+    def warn_about_quota(self) -> None:
+        """Once in a while, in the chat the person is using: before the free limit
+        stops the work, not after."""
+        for q in self.quota():
+            if q["used"] < 0.8 * q["limit"] or time.time() - self._quota_told.get(q["provider"], 0) < 1800:
+                continue
+            self._quota_told[q["provider"]] = time.time()
+            threads = [t for t in self.store.threads.values()
+                       if t.channel in self.config.conversation_channels and self.store.chat_of(t.key)]
+            if threads:
+                latest = max(threads, key=lambda t: self.store.chat_of(t.key)[-1]["ts"])
+                self.store.add_chat("rimuru", (
+                    f"Heads-up: this hour's free requests are nearly used up ({q['used']} of about "
+                    f"{q['limit']}). Work may pause for a while, and carries on by itself when it can."),
+                    chat=latest.key, notice="quota")
+            self.bus.emit("provider.quota", **q)
+
+    async def _every_minute(self) -> None:
+        while True:
+            await asyncio.sleep(30)
+            with contextlib.suppress(Exception):
+                self.warn_about_quota()
+                self.pool.sweep_warm()
+
     KEEP_DETAILS_DAYS = 30
 
     def keep_details_days(self) -> int:
@@ -611,8 +653,9 @@ class RimuruSystem:
             await asyncio.sleep(86400)
 
     async def stop(self) -> None:
-        if self._trimmer is not None:
-            self._trimmer.cancel()
+        for chore in (self._trimmer, self._minder):
+            if chore is not None:
+                chore.cancel()
         await self.connections.stop()
         await self.hands.stop()
         self.sim.stop()
@@ -857,6 +900,7 @@ class RimuruSystem:
             "shell": {"kind": self.shell.kind, "ready": self.shell.ready,
                       "detail": self.shell.describe()},
             "max_workers": self.config.max_workers,
+            "quota": self.quota(),
             "store": stats,
             # Tokens by who used them, added up here so no page needs every session.
             "usage_by_kind": self._usage_by_kind(),

@@ -103,6 +103,7 @@ class AgentLoop:
         # calling tools, with its final text - the Router uses it to catch an
         # answer that was written but never sent.
         self.turn_events: list[Injection] = []
+        self._notes: list[str] = []
         self.turn_opened_ts = 0.0
         self.on_turn_end: Callable[[str], Awaitable[None]] | None = None
         # The live conversation is saved after every step (store.save_context), so
@@ -137,6 +138,7 @@ class AgentLoop:
         result saying it was cut off - the model checks before relying on it); or
         while the model was thinking (it is asked again)."""
         self.messages = [Msg(role=m["role"], content=m["content"]) for m in saved.get("messages") or []]
+        self._notes = self.store.load_notes(self.session.id)
         last = self.messages[-1] if self.messages else None
         calls = ([b for b in last.content if isinstance(b, dict) and b.get("type") == "tool_use"]
                  if last is not None and last.role == "assistant" and isinstance(last.content, list)
@@ -205,6 +207,16 @@ class AgentLoop:
         if (self.cut_in is not None and call is not None and not call.done()
                 and not self._turn_from_person and self.cut_in(injection)):
             call.cancel()
+
+    def note(self, text: str) -> None:
+        """Something this session should know, without spending a turn on it: it
+        goes in with whatever wakes the session next."""
+        self._notes = [*self._notes[-19:], _clip(scrubbed(text), 3000)]
+        self._save_notes()
+
+    def _save_notes(self) -> None:
+        if self.persist:
+            self.store.save_notes(self.session.id, self._notes)
 
     def note_activity(self, what: str) -> None:
         self.last_activity_ts = now()
@@ -346,6 +358,10 @@ class AgentLoop:
                                           error=f"annotate: {type(exc).__name__}: {exc}")
                         if extra_context:
                             injected = f"{injected}\n\n{extra_context}"
+                    if self._notes:
+                        injected = "Since your last turn:\n" + "\n\n".join(self._notes) + f"\n\n{injected}"
+                        self._notes = []
+                        self._save_notes()
                     self.messages.append(Msg(role="user", content=injected))
                     batch_size = len(batch)
                     self._turn_from_person = self._from_person(batch)

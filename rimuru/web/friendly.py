@@ -253,6 +253,7 @@ def worker_card(store, session, conversation_channels) -> dict[str, Any]:
                   and task.worker_id == session.id else "",
         "attempt": task.attempt if task else 1,
         "turns": session.step_count,
+        "tokens": (session.usage.input_tokens or 0) + (session.usage.output_tokens or 0),
         # Skills it followed: the ones the person forced, then the ones it read.
         "skills": list(dict.fromkeys([*(task.skills if task else []), *summary["read_skills"]])),
     }

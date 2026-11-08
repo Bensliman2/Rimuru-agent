@@ -87,6 +87,9 @@ class Config:
     sessions_dir: Path = field(
         default_factory=lambda: Path(os.environ.get("RIMURU_SESSIONS", "./data/sessions")).resolve()
     )
+    # A new job within this long of the last one finishing in the same session
+    # goes to that same clone, which remembers the work (worker/pool.py).
+    warm_clone_seconds: float = field(default_factory=lambda: float(os.environ.get("RIMURU_WARM_CLONE_SECONDS", "600")))
     # The person's skills: one Markdown file each, for every clone (rimuru/skills.py).
     skills_dir: Path = field(default_factory=lambda: Path(
         os.environ.get("RIMURU_SKILLS") or ROOT / "skills").resolve())

@@ -671,6 +671,19 @@ class Store:
                                      (session_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def save_notes(self, session_id: str, notes: list[str]) -> None:
+        self._write("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                    (f"notes:{session_id}", json.dumps(notes)))
+
+    def load_notes(self, session_id: str) -> list[str]:
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (f"notes:{session_id}",)).fetchone()
+        return json.loads(row[0]) if row else []
+
+    def context_ids(self) -> list[str]:
+        with self._lock:
+            return [r[0] for r in self._conn.execute("SELECT session_id FROM contexts")]
+
     def drop_context(self, session_id: str) -> None:
         self._write("DELETE FROM contexts WHERE session_id = ?", (session_id,))
 

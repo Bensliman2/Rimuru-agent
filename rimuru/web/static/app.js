@@ -351,12 +351,15 @@
             "pretends to work. Click Models to choose one.";
     } else {
       text = "Online"; cls = "online";
+      const used = (w.quota || []).filter((q) => q.used > 0);
+      if (used.some((q) => q.used >= 0.8 * q.limit)) text = "Free limit nearly used";
+      const quotaNote = used.map((q) => `${q.provider}: ${q.used} of about ${q.limit} free requests used this hour.`).join(" ");
       const runs = w.shell.kind === "docker"
         ? "Clones can run code in a sealed sandbox with no internet access."
         : w.shell.kind === "host"
           ? "Clones run code directly on this computer."
           : "Clones cannot run code right now (start Docker Desktop to allow it).";
-      tip = `Clones think with ${w.model} (${w.provider}). ${runs} Click Models to change.`;
+      tip = `Clones think with ${w.model} (${w.provider}). ${runs} ${quotaNote} Click Models to change.`;
     }
     el.className = `status ${cls}`;
     $("status-text").textContent = text;
@@ -380,6 +383,12 @@
       if (m.role === "user") {
         parts.push(`<div class="msg user"><div><div class="bubble">${esc(m.text)}</div>
           <div class="time">${clock(m.ts)}</div></div></div>`);
+      } else if (m.role === "rimuru" && m.clone) {
+        // A clone telling the person itself how its job went.
+        const tint = tintOf(m).slice(1);
+        parts.push(`<div class="msg rimuru from-clone"><svg class="avatar"${tint ? ` style="${tint}"` : ""}><use href="#mark-clone"/></svg><div>
+          <div class="msg-from">${esc(m.clone)}</div>
+          <div class="bubble">${fmt(m.text)}</div><div class="time">${clock(m.ts)}</div></div></div>`);
       } else if (m.role === "rimuru") {
         parts.push(`<div class="msg rimuru">${mark("rimuru", "avatar")}<div>
           <div class="bubble">${fmt(m.text)}</div><div class="time">${clock(m.ts)}</div></div></div>`);
@@ -570,6 +579,7 @@
   }
 
   /* ------------------------------------------------------------- clones */
+  const tokens = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
   function card(c) {
     const status = {
       waiting: esc(c.activity),
@@ -579,6 +589,7 @@
       stopped: "Stopped",
       interrupted: "Interrupted by a restart",
     }[c.phase];
+    const cost = c.turns ? `${c.turns} AI call${c.turns === 1 ? "" : "s"}${c.tokens ? ` &middot; ${tokens(c.tokens)} tokens` : ""}` : "";
     const chips = [];
     if (c.files.length) chips.push(`<span class="chip">${icon("file")}${c.files.length} file${c.files.length > 1 ? "s" : ""}</span>`);
     if (c.tests) {
@@ -593,6 +604,7 @@
         <div class="cname" title="${esc(c.name)} ${esc(c.persona_line)}">${esc(c.name)}<span> &middot; ${esc(c.persona)}</span></div>
         <div class="ctitle">${esc(c.title)}</div>
         <div class="cstatus">${status}</div>
+        ${cost ? `<div class="ccost">${cost}</div>` : ""}
         ${chips.length ? `<div class="chips">${chips.join("")}</div>` : ""}
       </div>
       <span class="tip">${who}${c.phase === "working" ? esc(DOING[c.stage] || c.activity) + " right now. " : ""}Click to see exactly what it did.</span>
@@ -826,6 +838,13 @@
         until this is fixed:<ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`);
     }
 
+    if ((d.presets || []).length) {
+      parts.push(`<div class="section"><h3>Ready-made</h3><div class="presets">${d.presets.map((p) => `
+        <div class="preset"><div class="preset-main"><div class="preset-name">${esc(p.label)}</div>
+          <div class="preset-about">${esc(p.about)}</div>
+          <div class="preset-models">Rimuru: <code>${esc(p.router)}</code> &middot; Clones: <code>${esc(p.worker)}</code></div></div>
+          <button class="primary small" data-preset="${esc(p.id)}">Use this</button></div>`).join("")}</div></div>`);
+    }
     const icons = ROLE_ICON();
     const options = (role) => {
       const opts = role === "watchdog" || role === "filter"
@@ -1027,6 +1046,18 @@
     setTimeout(() => { b.textContent = label; }, 1800);
   });
 
+  $("set-body").addEventListener("click", async (ev) => {
+    const b = ev.target.closest("[data-preset]");
+    if (!b) return;
+    if ((S.dirty || S.editing) && !confirm("Use this instead of the changes you have not saved?")) return;
+    note("Checking the models are still offered\u2026", "");
+    try {
+      const r = await post("/api/models/preset", { id: b.dataset.preset });
+      loadSettings(r);
+      note(r.note, "ok");
+      refresh();
+    } catch (e) { note(e.message, "bad"); }
+  });
   $("models-btn").addEventListener("click", openSettings);
   $("demo-setup").addEventListener("click", openSettings);
   $("settings-close").addEventListener("click", closeSettings);

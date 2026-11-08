@@ -18,7 +18,7 @@ import re
 import time
 from typing import Any
 
-from .bus import Bus
+from .bus import STORY, Bus, compact
 from .channels.base import ChannelRegistry, ConsoleChannel
 from .channels.scenario import (
     Scenario,
@@ -62,6 +62,10 @@ class RimuruSystem:
 
         self.bus = Bus()
         self.store = Store(self.config.db_path, bus=self.bus)
+        # The story so far, and from now on saved as it happens: a restart must
+        # not blank the pages.
+        self.bus.restore(self.store.recent_events(self.bus.history.maxlen or 2000))
+        self.bus.on("*", self._keep_event)
 
         # --- channels (s4.2) ---
         self.channels = ChannelRegistry(bus=self.bus)
@@ -318,6 +322,10 @@ class RimuruSystem:
     # ------------------------------------------------------------------ #
     # deleting a session
     # ------------------------------------------------------------------ #
+    def _keep_event(self, event: dict[str, Any]) -> None:
+        if event["topic"] in STORY:
+            self.store.add_event(compact(event))
+
     async def delete_session(self, key: str, *, delete_folder: bool = False) -> dict[str, Any]:
         """Forget a chat session for good. Its clones are stopped first; its files
         go only when asked, and only from Rimuru's own folder for it - a folder
@@ -362,16 +370,20 @@ class RimuruSystem:
                 break
             await asyncio.sleep(0.1)
 
-        clones = [t.worker_id for t in self.store.tasks.values() if t.thread_id == thread.id]
+        jobs = [t for t in self.store.tasks.values() if t.thread_id == thread.id]
+        clones = [t.worker_id for t in jobs]
+        # Events about its clones and jobs name those, not the session.
+        story_marks = (*marks, *(c for c in clones if c), *(t.id for t in jobs))
         counts = self.store.delete_session_records(thread.id)
         for clone in clones:
             self.pool.workers.pop(clone or "", None)
             self.pool.launched.discard(clone or "")
         self._forget_in_router(thread)
         self._forget_in_rimurus_turns(marks)
-        kept = [e for e in self.bus.history if not any(m in str(e) for m in marks)]
+        kept = [e for e in self.bus.history if not any(m in str(e) for m in story_marks)]
         self.bus.history.clear()
         self.bus.history.extend(kept)
+        self.store.forget_events(story_marks)
         self.bus.emit("chat.deleted", key=key)
         return {"ok": True, "folder_deleted": folder, **counts}
 

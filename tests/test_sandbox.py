@@ -117,3 +117,15 @@ def test_installed_packages_work_offline_and_the_installer_never_sees_the_files(
     # The installer had the internet but no view of the work folder.
     args = shell._install_args(["six"], "python", "x", deps)
     assert not any(str(work) in a or a.endswith(":/workspace") for a in args)
+
+
+def test_files_that_hold_secrets_are_empty_inside(shell, tmp_path):
+    (tmp_path / ".env").write_text("TOKEN=super-secret-value")
+    (tmp_path / ".ssh").mkdir()
+    (tmp_path / ".ssh" / "id_rsa").write_text("private-key-material")
+    (tmp_path / "app.py").write_text("print('visible')")
+    status, out = run(shell, "cat .env; cat .ssh/* 2>/dev/null; python app.py; echo written > made.txt && echo ok")
+    assert status == "done", out
+    assert "super-secret-value" not in out and "private-key-material" not in out
+    assert "visible" in out and (tmp_path / "made.txt").read_text().strip() == "written"
+    assert (tmp_path / ".env").read_text() == "TOKEN=super-secret-value", "the real file is untouched"

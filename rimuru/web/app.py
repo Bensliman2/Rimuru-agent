@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..bus import STORY
 from ..config import CONFIG, ROOT
 from ..llm import catalog
 from ..recall import recall as do_recall
@@ -538,7 +539,7 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         queue = system.bus.subscribe_queue()
         try:
             # Prime the client with recent history so a late join is not blank.
-            await socket.send_json({"topic": "_backlog", "events": system.bus.recent(120)})
+            await socket.send_json({"topic": "_backlog", "events": system.bus.recent(400, topics=set(STORY))})
             while True:
                 event = await queue.get()
                 await socket.send_json(event)

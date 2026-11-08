@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS chat (
 );
 CREATE TABLE IF NOT EXISTS contexts (session_id TEXT PRIMARY KEY, ts REAL, data TEXT);
 CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, ts REAL, data TEXT);
+CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, topic TEXT, data TEXT);
 CREATE INDEX IF NOT EXISTS steps_session ON steps(session_id, idx);
 CREATE INDEX IF NOT EXISTS triggers_thread ON triggers(thread_id);
 CREATE INDEX IF NOT EXISTS triggers_ts ON triggers(ts);
@@ -102,6 +103,7 @@ class Store:
 
         # The person's conversation with Rimuru.
         self.chat: list[dict[str, Any]] = []
+        self._events_added = 0
 
         # Reload everything that was saved. The loops are stateless (article
         # s5.1), so a restart must find the same tasks, sessions, transcripts,
@@ -152,6 +154,26 @@ class Store:
         if self.bus:
             self.bus.emit("chat.message", message=entry)
         return entry
+
+    # ------------------------------------------------------------------ #
+    # the story the pages show (bus.STORY): kept, within a limit
+    # ------------------------------------------------------------------ #
+    def add_event(self, event: dict[str, Any], *, keep: int = 5000) -> None:
+        self._write("INSERT INTO events (ts, topic, data) VALUES (?,?,?)",
+                    (event["ts"], event["topic"], json.dumps(event, default=str)))
+        self._events_added += 1
+        if self._events_added % 200 == 0:
+            self._write("DELETE FROM events WHERE seq <= (SELECT MAX(seq) - ? FROM events)", (keep,))
+
+    def recent_events(self, limit: int) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT data FROM events ORDER BY seq DESC LIMIT ?", (limit,)).fetchall()
+        return [json.loads(r[0]) for r in reversed(rows)]
+
+    def forget_events(self, marks: Iterable[str]) -> None:
+        """Every saved event that mentions any of these (a deleted session's IDs)."""
+        for mark in marks:
+            self._write("DELETE FROM events WHERE instr(data, ?) > 0", (mark,))
 
     def add_note(self, note: str) -> dict[str, Any]:
         entry = {"ts": now(), "note": note}

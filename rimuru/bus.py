@@ -14,6 +14,31 @@ from typing import Any, Awaitable, Callable
 
 Handler = Callable[[dict[str, Any]], Awaitable[None] | None]
 
+# What the pages tell as the story of what happened ("Latest", "What it decided
+# and said", "What it did"). These are saved, so a restart does not blank them;
+# the rest - steps, status updates - already live in their own records.
+STORY = frozenset({
+    "filter.decided", "trigger.routed", "tool.called", "worker.spawned", "worker.queued",
+    "worker.finished", "worker.handback", "thread.subscribed", "channel.sent",
+    "watchdog.nudged", "watchdog.assessed", "watchdog.escalated", "watchdog.answer",
+    "session.cut_in", "router.reply_held", "safety.hidden_instructions", "session.error",
+    "session.spilled", "speculation.discarded", "models.changed", "sim.started",
+    "sim.completed", "system.started",
+})
+
+
+def compact(event: dict[str, Any]) -> dict[str, Any]:
+    """An event as it is saved: long text cut - a tool call can carry a whole file."""
+    out: dict[str, Any] = {}
+    for key, value in event.items():
+        if isinstance(value, str):
+            out[key] = value[:1000]
+        elif key == "args" and isinstance(value, dict):
+            out[key] = {k: v[:300] if isinstance(v, str) else v for k, v in value.items()}
+        else:
+            out[key] = value
+    return out
+
 
 class Bus:
     def __init__(self, history: int = 2000) -> None:
@@ -21,6 +46,11 @@ class Bus:
         self._queues: list[asyncio.Queue] = []
         self.history: deque[dict[str, Any]] = deque(maxlen=history)
         self._seq = 0
+
+    def restore(self, events: list[dict[str, Any]]) -> None:
+        """Saved events, back in the history after a restart."""
+        self.history.extend(events)
+        self._seq = max([self._seq, *(int(e.get("seq") or 0) for e in events)])
 
     def on(self, topic: str, handler: Handler) -> None:
         """Register a handler. Topic '*' receives everything."""

@@ -19,3 +19,7 @@ data/
 config/models.toml
 config/*.tmp
 .env.tmp
+
+# Your skills (skills/*.md) are yours too; only the folder's README is shared.
+skills/*
+!skills/README.md

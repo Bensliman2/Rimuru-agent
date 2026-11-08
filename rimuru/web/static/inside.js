@@ -717,6 +717,7 @@
     list_tasks: () => ["decide", "search", "checked the list of jobs"],
     remember: (a) => ["decide", "book", `noted something to remember: “${short(a.note || a.text, 90)}”`],
     recall: (a) => ["decide", "book", `looked up ${a.obj_id || a.id || "something"}`],
+    use_skill: (a) => ["clone", "book", `read your skill “${short(a.name, 60)}”`],
     thread_context: () => ["decide", "book", "re-read a conversation"],
     spill: () => ["decide", "book", "looked at what is out of its working memory"],
     read_file: (a) => ["clone", "file", `read ${a.path}`],

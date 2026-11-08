@@ -85,6 +85,9 @@ class Config:
     sessions_dir: Path = field(
         default_factory=lambda: Path(os.environ.get("RIMURU_SESSIONS", "./data/sessions")).resolve()
     )
+    # The person's skills: one Markdown file each, for every clone (rimuru/skills.py).
+    skills_dir: Path = field(default_factory=lambda: Path(
+        os.environ.get("RIMURU_SKILLS") or ROOT / "skills").resolve())
 
     # Channels that are one continuous conversation with a person. The Router
     # owns these; workers never subscribe to them.

@@ -25,6 +25,7 @@ from ..agent.tools import ToolRegistry, enum, obj, register_recall, s
 from ..context import inline_task, inline_thread
 from ..ids import ROUTER_SESSION_ID, new_id
 from .. import memory
+from .. import skills as skillbook
 from ..models import Memory, Session, Task
 from ..recall import spill_digest
 
@@ -533,13 +534,18 @@ class RouterAgent:
                 if (th := self.store.threads.get(t)) is not None and th.channel in conv}
         picked = memory.relevant(self.store.memories.values(), text=text, session_keys=keys,
                                  exclude=self._shown)
+        # The person's skills (rimuru/skills.py) come up only when they talk about
+        # skills - "use my deploy skill", "what skills do you have?" - not every turn.
+        said = " ".join(i.text for i in batch if getattr(i, "kind", "") == "human")
+        about_skills = (skillbook.for_router(skillbook.load_all(self.config.skills_dir))
+                        if re.search(r"\bskills?\b", said, re.I) else "")
         if not picked:
-            return ""
+            return about_skills
         for m in picked:
             self._shown.add(m.id)
             m.used_ts, m.uses = time.time(), m.uses + 1
             self.store.put_memory(m, quiet=True)
-        return memory.for_router(picked)
+        return memory.for_router(picked) + (f"\n{about_skills}" if about_skills else "")
 
     def _session_for(self, args: dict[str, Any], loop: AgentLoop) -> Any:
         thread = self.store.threads.get(str(args.get("thread_id") or "").strip())

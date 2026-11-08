@@ -155,6 +155,8 @@ class Guide:
                          f'{friendly.plain(task.brief)[:600] if task else "(unknown)"}')
             lines.append(f'  Now: {self._line(card)}. Files changed: '
                          f'{", ".join(card["files"][:10]) or "none"}. Tests: {card["tests"] or "none run"}.')
+            if card["skills"]:
+                lines.append(f"  Skills of the person's it read: {', '.join(card['skills'])}.")
             if card["result"]:
                 lines.append(f"  It reported: {card['result'][:800]}")
             steps = friendly.worker_timeline(store, worker)[-12:]

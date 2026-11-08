@@ -68,6 +68,13 @@ Then open **http://127.0.0.1:8800**.
   conventions. From then on every clone that works there reads it first, the way
   Claude Code reads `CLAUDE.md`; a folder with an `AGENTS.md` or `CLAUDE.md` of its own
   works too. Run `/init` again to bring the guide up to date. It works from Telegram too.
+- **Skills: your how-tos, for every clone.** The **Skills** button keeps how-tos you
+  write once - your code style, how you test, how you deploy. Each is its own file in
+  `skills/` (edit them by hand if you like; `skills/README.md` shows the format). Every
+  clone sees the list - each skill's name and when to use it - and reads one in full
+  only when it fits its job, so many skills cost almost nothing. Turn one off to keep it
+  without using it; a clone's details show which of your skills it used. Skills are
+  instructions, not code: they give a clone no new powers. Keep passwords and keys out.
 - **Every clone has a name, a persona and a color** - Mika the amber one, Dax the mint
   one - and the clones working side by side never share a color.
 - **Rimuru remembers.** It keeps lasting facts by itself - about you, about each
@@ -296,6 +303,7 @@ rimuru/
   folders.py     picking a session's folder, safely
   guide.py       the Guide: questions about sessions and clones
   commands.py    commands typed in the chat: /init, and the project guide clones read
+  skills.py      your skills: one file each, listed for every clone, read when they fit
 config/          models.toml - your models (made by the Models button), and an example
 data/            your own data, never committed:
   rimuru.db        everything Rimuru remembers - chats, jobs, every step
@@ -303,9 +311,10 @@ data/            your own data, never committed:
   practice/        where practice runs play
   github/          working copies of your repositories, for GitHub work
   deps/            packages clones installed, one set per work folder
+skills/          your skills, one Markdown file each - yours, not committed (see its README)
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           106 automated checks
+tests/           111 automated checks
 run.py           serve | bench | verify | trace | eval | speed | hands
 ```

@@ -30,6 +30,7 @@ from ..ids import new_id
 from ..sessions import display
 from ..models import Job, Session, Task
 from .. import persona
+from .. import skills as skillbook
 from ..safety import hidden_instructions, warning_for_model
 from .files import LocalFiles, Refused
 from .shell import check_packages, deps_dir_for
@@ -151,8 +152,12 @@ class WorkerAgent:
         files: Any = None,
         where: str | None = None,
         guide: str = "",
+        skills: list[Any] | None = None,
     ) -> None:
         self.task = task
+        # The person's skills, as they stood when this clone began: the brief
+        # lists them, use_skill() reads one (rimuru/skills.py).
+        self.skills = [sk for sk in (skills or []) if sk.enabled]
         if files is not None:
             # A folder on another machine (rimuru/hands): its files and its
             # commands go there; nothing is made on this computer.
@@ -242,6 +247,8 @@ class WorkerAgent:
             )
         if guide:
             brief += guide
+        if self.skills:
+            brief += skillbook.for_brief(self.skills)
         if memories:
             brief += memories.rstrip() + "\n\n"
         if resume_note:
@@ -319,6 +326,16 @@ class WorkerAgent:
             obj(thread_id=s("Thread ID (thr_...)"), reason=s("Why", optional=True)),
             self._tool_subscribe,
         )
+
+        if self.skills:
+            reg.add(
+                "use_skill",
+                "Read one of the person's skills in full - a how-to they wrote (their code "
+                "style, how they deploy, ...). Use it when a skill listed in your brief fits "
+                "your job, before you do that part.",
+                obj(name=s("The skill's name, as listed in your brief")),
+                self._tool_use_skill,
+            )
 
         reg.add(
             "handback",
@@ -492,6 +509,21 @@ class WorkerAgent:
             return f'No thread "{thread_id}".'
         self.store.subscribe(thread_id, self.session.id)
         return f"Subscribed to {thread_id}; its events will now arrive here."
+
+    async def _tool_use_skill(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        key = str(args.get("name") or "").strip()
+        # Read now, from its file: an edit since this clone began counts, and a
+        # skill turned off since cannot be used.
+        skill = skillbook.get(self.config.skills_dir, key)
+        if skill is None or not skill.enabled:
+            usable = [sk.slug for sk in skillbook.load_all(self.config.skills_dir) if sk.enabled]
+            return (f"No skill called {key!r}."
+                    + (f" The skills are: {', '.join(usable)}." if usable else " There are none now."))
+        self.store.touch_session(self.session, current_activity=f"reading the skill {skill.name}")
+        self.bus.emit("skill.used", session_id=self.session.id, task_id=self.task.id,
+                      skill=skill.slug, name=skill.name)
+        return (f'SKILL "{skill.name}" - the person wrote this. Follow it for your job unless the job '
+                f"says otherwise.\n\n{skill.text}")
 
     async def _tool_handback(self, args: dict[str, Any], loop: AgentLoop) -> str:
         trigger_id = str(args.get("trigger_id") or "").strip()

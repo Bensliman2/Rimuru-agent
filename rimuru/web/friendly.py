@@ -11,6 +11,7 @@ import re
 import time
 from typing import Any
 from .. import persona
+from .. import skills as skillbook
 
 PASSED_RE = re.compile(r"(\d+) passed")
 FAILED_RE = re.compile(r"(\d+) failed")
@@ -90,6 +91,8 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
         return f"Finished: {_short(args.get('summary'), 160)}"
     if name == "recall":
         return "Looked up earlier context"
+    if name == "use_skill":
+        return f"Read your skill “{_short(args.get('name'), 60)}”"
     if name == "subscribe":
         return "Started following a related conversation"
     if name == "unsubscribe":
@@ -108,6 +111,7 @@ ACTIVITY = {
     "report": "Updating Rimuru",
     "finish": "Wrapping up",
     "recall": "Checking earlier context",
+    "use_skill": "Reading one of your skills",
 }
 
 
@@ -232,6 +236,7 @@ def worker_card(store, session, conversation_channels) -> dict[str, Any]:
                   and task.worker_id == session.id else "",
         "attempt": task.attempt if task else 1,
         "turns": len(steps),
+        "skills": skillbook.used_names(steps),
     }
 
 

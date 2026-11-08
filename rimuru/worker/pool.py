@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import commands, memory, persona
+from .. import skills as skillbook
 from ..context import inline_trigger
 from ..ids import new_id
 from ..llm import build_client
@@ -174,6 +175,7 @@ class WorkerPool:
             files=files,
             where=where,
             guide=guide,
+            skills=skillbook.load_all(self.config.skills_dir),
         )
         self.workers[session.id] = worker
         self.store.update_task(task, worker_id=session.id, status="queued")

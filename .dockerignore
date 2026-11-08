@@ -1,0 +1,22 @@
+# Your own things never go into the image: they are mounted at run time.
+.env
+.env.*
+data/
+rimuru-data/
+projects/
+skills/*
+!skills/README.md
+config/models.toml
+token
+token.txt
+*.token
+
+# Not needed to run it
+.git/
+.claude/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/

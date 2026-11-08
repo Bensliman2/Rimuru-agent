@@ -37,6 +37,7 @@ from .connections import Connections
 from .hands.hub import HandsHub
 from .safety import notice_for_person
 from . import commands, sessions as chats
+from . import skills as skillbook
 from .sessions import title_from, title_of
 from .router.filtering import EventFilter
 from .router.routing import EventRouter
@@ -608,12 +609,19 @@ class RimuruSystem:
         channel: str = "console",
         thread_key: str = "direct",
         author: str = "you",
+        skills: list[str] | None = None,
+        said: str | None = None,
     ) -> Trigger:
         """A person talking to the agent directly from the dashboard.
 
         kind=human_direct bypasses the Fast Path's noise filters: a message
-        addressed straight at the agent is never chatter.
+        addressed straight at the agent is never chatter. `skills` are skills the
+        person forced for it (/skill_<name>); `said` is the message as they typed
+        it, when that differs from what Rimuru is given.
         """
+        meta: dict[str, Any] = {"thread_title": title_from(text)}   # a session is named after it
+        if skills:
+            meta["skills"] = list(skills)
         trigger = Trigger(
             id=new_id("trigger"),
             channel=channel,
@@ -621,13 +629,42 @@ class RimuruSystem:
             author=author,
             kind="human_direct",
             content=text,
-            # A session is named after the first thing the person asked.
-            meta={"thread_title": title_from(text)},
+            meta=meta,
         )
         if channel in self.config.conversation_channels:
-            self.store.add_chat("user", text, trigger_id=trigger.id, chat=thread_key)
+            self.store.add_chat("user", said or text, trigger_id=trigger.id, chat=thread_key)
         await self.ingest(trigger)
         return trigger
+
+    async def person_says(self, text: str, *, channel: str = "console", thread_key: str = "direct",
+                          author: str = "you") -> dict[str, Any]:
+        """Everything a person types in a session: a command (/status, /init), a
+        message with skills forced (/skill_web_pages build a page), or a plain
+        message for Rimuru. A command or a refusal is answered at once ("said")."""
+        text = (text or "").strip()
+        if commands.parse(text) is not None:
+            return await self.run_command(thread_key, text, channel=channel)
+        picked = skillbook.forced(text)
+        if picked is None:
+            trigger = await self.human_message(text, channel=channel, thread_key=thread_key, author=author)
+            return {"ok": True, "trigger_id": trigger.id}
+        names, rest = picked
+        found, missing = skillbook.resolve(self.config.skills_dir, names)
+        if missing or not rest:
+            said = (self._no_such_skill(missing) if missing else
+                    f"Write what you want done after it, for example: /{names[0]} build a landing page")
+            self.store.add_chat("user", text, chat=thread_key)
+            self.store.add_chat("rimuru", said, chat=thread_key, notice="command")
+            return {"ok": False, "said": said}
+        trigger = await self.human_message(rest, channel=channel, thread_key=thread_key, author=author,
+                                           skills=[s.name for s in found], said=text)
+        return {"ok": True, "trigger_id": trigger.id, "skills": [s.name for s in found]}
+
+    def _no_such_skill(self, missing: list[str]) -> str:
+        usable = [s for s in skillbook.load_all(self.config.skills_dir) if s.enabled]
+        mine = (" Yours: " + ", ".join(f"/{skillbook.command_for(s)}" for s in usable[:8]) + "."
+                if usable else " You have none yet - add them with the Skills button.")
+        return f"There is no skill called {', '.join(repr(m) for m in missing)}.{mine}"
 
     # ------------------------------------------------------------------ #
     # commands typed in the chat (rimuru/commands.py)
@@ -644,10 +681,17 @@ class RimuruSystem:
         self.store.add_chat("user", text.strip(), chat=key, command=name)
         if name == "init":
             ok, said, clone = await self._command_init(thread)
+        elif name == "status":
+            ok, said, clone = True, commands.status_for(self, thread), ""
+        elif name.startswith("skill_"):
+            found, missing = skillbook.resolve(self.config.skills_dir, [name[len("skill_"):]])
+            ok, clone = False, ""
+            said = (self._no_such_skill(missing) if missing else
+                    f"Write what you want done after it, for example: /{name} build a landing page")
         else:
-            ok, said, clone = False, (f"There is no /{name} command. Try /init - it studies this "
-                                      f"session's folder and writes RIMURU.md, a guide every clone "
-                                      f"reads first."), ""
+            ok, said, clone = False, (f"There is no /{name} command. Try /status - how this session's "
+                                      f"work is going - or /init, which studies this session's folder "
+                                      f"and writes RIMURU.md, a guide every clone reads first."), ""
         self.store.add_chat("rimuru", said, chat=key, notice="command")
         self.bus.emit("command.ran", command=name, ok=ok, thread_id=thread.id, clone=clone)
         return {"ok": ok, "said": said, "clone": clone}
@@ -702,6 +746,28 @@ class RimuruSystem:
         return scenario
 
     # ------------------------------------------------------------------ #
+    def message_counts(self) -> tuple[dict[str, int], dict[str, int]]:
+        """What came in and where it went, from every stored message."""
+        seen = {"seen": 0, "dropped_fast": 0, "dropped_slow": 0, "accepted": 0, "slow_calls": 0}
+        went = {"passthrough": 0, "to_router": 0, "direct": 0}
+        for t in self.store.triggers.values():
+            seen["seen"] += 1
+            if t.verdict == "dropped_fast":
+                seen["dropped_fast"] += 1
+            elif t.verdict == "dropped_slow":
+                seen["dropped_slow"] += 1
+                seen["slow_calls"] += 1
+            elif t.verdict == "accepted" and t.kind != "human_direct" and t.route != "passthrough":
+                seen["accepted"] += 1
+                seen["slow_calls"] += 1
+            if t.route == "passthrough":
+                went["passthrough"] += 1
+            elif t.route == "router":
+                went["to_router"] += 1
+            if t.kind == "human_direct":
+                went["direct"] += 1
+        return seen, went
+
     def overview(self) -> dict[str, Any]:
         stats = self.store.stats()
         uptime = (time.time() - self.started_ts) if self.started_ts else 0.0
@@ -729,8 +795,9 @@ class RimuruSystem:
                       "detail": self.shell.describe()},
             "max_workers": self.config.max_workers,
             "store": stats,
-            "filter": self.filter.describe()["counters"],
-            "routing": {**self.event_router.stats(), "handbacks": self.pool.handbacks},
+            # Counted from the stored messages: a restart no longer empties "What came in".
+            "filter": self.message_counts()[0],
+            "routing": {**self.message_counts()[1], "handbacks": self.pool.handbacks},
             "router": {
                 "status": self.router.session.status,
                 "queued": self.router.loop.inbox.qsize(),

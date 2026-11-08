@@ -110,6 +110,9 @@ THE DIRECT CHAT (channel "console" - and "telegram", the same person on their ph
     one session's work into another unless the person does.
   - Each clone has a name (it comes with the dispatch result). Telling the
     person who is on it is fine - "Mika is on it" - and keeps it personal.
+  - On Telegram (their phone): never paste code or file contents into a reply.
+    Just do the job, then say in plain words what was done and how to use it.
+    Only when they ask for the files or the code, call send_files.
   - Answer first. When the person asks for something, reply in the SAME turn
     you act on it (reply and dispatch_task can go together), so they never
     wait through several of your turns before hearing from you.
@@ -326,6 +329,15 @@ class RouterAgent:
         )
 
         reg.add(
+            "send_files",
+            "Telegram only: send the person the files a finished job made, as attachments. "
+            "Only when they ask for the files or the code - never on your own.",
+            obj(thread_id=s("The Telegram thread (thr_...)"),
+                task_id=s("The job (tsk_...); default: the latest finished one there", optional=True)),
+            self._tool_send_files,
+        )
+
+        reg.add(
             "spill",
             "Show the events that bypassed you by passing straight through to "
             "subscribed workers. Use it to catch up on what happened without you.",
@@ -372,16 +384,29 @@ class RouterAgent:
             # chat session this turn is about, when that is clear.
             thread_id = self._session_of_this_turn(loop)
 
+        # The message this job answers: one from this turn on that thread that no
+        # job answers yet - not merely the thread's latest, which may be a newer
+        # message that arrived while Rimuru was thinking.
         origin = None
-        if thread_id and (thread := self.store.threads.get(thread_id)) and thread.trigger_ids:
+        answered = {t.origin_trigger_id for t in self.store.tasks.values() if t.origin_trigger_id}
+        for injection in getattr(loop, "turn_events", None) or []:
+            trigger = self.store.triggers.get(getattr(injection, "trigger_id", None) or "")
+            if trigger is not None and trigger.thread_id == thread_id and trigger.id not in answered:
+                origin = trigger.id
+                break
+        if origin is None and thread_id and (thread := self.store.threads.get(thread_id)) and thread.trigger_ids:
             origin = thread.trigger_ids[-1]
 
+        # Skills the person forced for the message this answers (/skill_<name>):
+        # the job gets them in full, whether or not the brief mentions them.
+        forced = self._forced_skills(loop, thread_id)
         task = self.store.put_task(Task(
             id=new_id("task"),
             title=title,
             brief=brief,
             thread_id=thread_id,
             origin_trigger_id=origin,
+            skills=forced,
         ))
         try:
             worker, started = await self.pool.submit(
@@ -514,8 +539,39 @@ class RouterAgent:
     async def _tool_message_worker(self, args: dict[str, Any], loop: AgentLoop) -> str:
         worker_id = str(args.get("worker_id") or "").strip()
         text = str(args.get("text") or "").strip()
+        worker = self.pool.workers.get(worker_id)
+        forced = self._forced_skills(loop, worker.task.thread_id if worker is not None else None)
+        if forced:
+            # The person forced a skill for what is being passed on: it goes along, in full.
+            text += "\n\n" + skillbook.for_forced(skillbook.resolve(self.config.skills_dir, forced)[0])
         ok = self.pool.inject(worker_id, f"Relayed by the Router:\n{text}", kind="human")
         return f"Delivered to {worker_id}." if ok else f"{worker_id} is not a live worker."
+
+    async def _tool_send_files(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        thread = self.store.threads.get(str(args.get("thread_id") or "").strip())
+        if thread is None or thread.channel != "telegram":
+            return "send_files is for Telegram chats only; in the app the person has the folder."
+        telegram = self.channels.channels.get("telegram")
+        if telegram is None or not hasattr(telegram, "send_job_files"):
+            return "Telegram is not connected right now."
+        wanted = str(args.get("task_id") or "").strip()
+        done = sorted((t for t in self.store.tasks.values()
+                       if t.thread_id == thread.id and t.status == "done" and (not wanted or t.id == wanted)),
+                      key=lambda t: t.finished_ts or 0)
+        if not done:
+            return "No finished job on that chat has files to send."
+        sent = await telegram.send_job_files(done[-1])
+        return (f"Sent on Telegram: {', '.join(sent)}." if sent else
+                "There were no files to send - none made, or too big for Telegram (10 MB).")
+
+    def _forced_skills(self, loop: AgentLoop, thread_id: str | None) -> list[str]:
+        """Skills the person forced (/skill_<name>) for this turn's messages on a thread."""
+        names: list[str] = []
+        for injection in getattr(loop, "turn_events", None) or []:
+            trigger = self.store.triggers.get(getattr(injection, "trigger_id", None) or "")
+            if trigger is not None and (thread_id is None or trigger.thread_id == thread_id):
+                names += [n for n in trigger.meta.get("skills") or [] if n not in names]
+        return names
 
     async def _tool_spill(self, args: dict[str, Any], loop: AgentLoop) -> str:
         return spill_digest(self.store)

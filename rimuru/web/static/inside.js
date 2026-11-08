@@ -65,7 +65,7 @@
   const CHANNEL = { console: "Your chat", im: "Team chat", github: "GitHub" };
   const isLive = (c) => c.phase === "working" || c.phase === "waiting";
 
-  const VIEWS = ["overview", "guide", "rimuru", "clones", "watchdog", "messages", "memory", "practice"];
+  const VIEWS = ["overview", "rimuru", "clones", "watchdog", "messages", "memory", "practice"];
   const state = {
     view: "overview", overview: null, sessions: {}, cards: [], threads: [], turns: [],
     events: [], clone: null, dirty: true, feedsDirty: true, connected: false,
@@ -112,7 +112,7 @@
     if (!o) return;
     renderStatus(o);
     renderTabs(o);
-    const render = { overview: renderOverview, guide: renderGuide, rimuru: renderRimuru, clones: renderClones,
+    const render = { overview: renderOverview, rimuru: renderRimuru, clones: renderClones,
       watchdog: renderWatchdog, messages: renderMessages, memory: renderMemory, practice: renderPractice };
     render[state.view](o);
   }
@@ -332,109 +332,44 @@
     showTranscript("wd-turns", "wdg_main");
   }
 
-  /* ================================================================ guide */
-  // Ask about sessions and clones. Common questions are answered at once from the
-  // records; anything else by the AI, from the facts about what is picked.
-  const guide = { session: "", clone: "", log: [], busy: false, chats: [], chatsTs: 0, sig: "" };
-  try { guide.log = JSON.parse(sessionStorage.getItem("rimuru-guide") || "[]").filter((m) => !m.pending).slice(-30); }
-  catch { /* a private window: start empty */ }
-  const saveGuide = () => {
-    try { sessionStorage.setItem("rimuru-guide", JSON.stringify(guide.log.filter((m) => !m.pending).slice(-30))); }
-    catch { /* not kept, that is fine */ }
-  };
-  const fmt = (text) => {
-    const out = [];
-    let list = [];
-    const flush = () => { if (list.length) { out.push(`<ul>${list.join("")}</ul>`); list = []; } };
-    for (const line of String(text || "").split("\n")) {
-      if (/^\s*[-•*]\s+/.test(line)) list.push(`<li>${esc(line.replace(/^\s*[-•*]\s+/, ""))}</li>`);
-      else { flush(); if (line.trim()) out.push(`<p>${esc(line)}</p>`); }
-    }
-    flush();
-    return out.join("");
-  };
-
-  async function renderGuide() {
-    if (Date.now() - guide.chatsTs > 15000) {
-      try { guide.chats = (await api("/api/chats")).items; guide.chatsTs = Date.now(); } catch { /* restarting */ }
-    }
-    if (guide.session && !guide.chats.some((x) => x.key === guide.session)) guide.session = "";
-    const clones = state.cards.filter((c) => !guide.session || (c.session && c.session.key === guide.session));
-    if (guide.clone && !clones.some((c) => c.id === guide.clone)) guide.clone = "";
-    const sig = JSON.stringify([guide.chats.map((x) => [x.key, x.title]),
-      clones.map((c) => [c.id, c.name, c.title, c.phase]), guide.session, guide.clone]);
-    if (sig !== guide.sig) {
-      guide.sig = sig;
-      $("guide-session").innerHTML = '<option value="">All sessions</option>' + guide.chats.map((x) =>
-        `<option value="${esc(x.key)}"${x.key === guide.session ? " selected" : ""}>${esc(short(x.title, 60))}</option>`).join("");
-      $("guide-clone").innerHTML = `<option value="">${clones.length ? "Any clone" : "No clones yet"}</option>` +
-        clones.map((c) => `<option value="${esc(c.id)}"${c.id === guide.clone ? " selected" : ""}>${esc(c.name)} - ${
-          esc(short(c.title, 46))}${isLive(c) ? " (working)" : ""}</option>`).join("");
-      $("guide-clone").disabled = !clones.length;
-    }
-    const c = state.cards.find((x) => x.id === guide.clone);
-    const quick = c
-      ? [`What is ${c.name} doing?`,
-        c.phase === "failed" || c.phase === "stopped" || c.phase === "interrupted" ? `Why did ${c.name} stop?`
-          : c.phase === "done" ? `What did ${c.name} change?` : `Is ${c.name} stuck?`]
-      : ["How many clones are working?", "What is each clone doing?"].concat(guide.session ? ["How is this session going?"] : []);
-    setHTML($("guide-quick"), quick.map((q) => `<button class="chip" data-ask="${esc(q)}"><span class="t">${esc(q)}</span></button>`).join(""));
-    renderGuideLog();
-  }
-  function renderGuideLog() {
-    const box = $("guide-log");
-    setHTML(box, guide.log.length ? guide.log.map((m) => m.who === "you"
-      ? `<div class="g-msg you"><div class="g-bubble">${esc(m.text)}</div>${m.scope ? `<div class="g-meta">${esc(m.scope)}</div>` : ""}</div>`
-      : `<div class="g-msg guide${m.error ? " err" : ""}"><span class="g-icon">${icon("compass")}</span>
-          <div class="g-main"><div class="g-bubble">${m.pending ? '<span class="g-dots"><i></i><i></i><i></i></span>' : fmt(m.text)}</div>
-          <div class="g-meta">${m.pending ? "Looking…" : m.error ? "Not answered" : m.demo ? "Demo mode - no AI model set up"
-            : m.instant ? "From the records - no AI needed"
-            : `Answered by the AI${m.seconds ? ` in ${m.seconds}s` : ""}`}</div></div></div>`).join("")
-      : '<p class="muted g-empty">Ask a question, or tap one above.</p>');
-    box.scrollTop = box.scrollHeight;
-    $("guide-clear").hidden = !guide.log.length || guide.busy;
-    $("guide-send").disabled = guide.busy;
-  }
-  async function askGuide(question) {
-    question = String(question || "").trim();
-    if (!question || guide.busy) return;
-    const s = guide.chats.find((x) => x.key === guide.session);
-    const c = state.cards.find((x) => x.id === guide.clone);
-    const about = [s && `“${short(s.title, 40)}”`, c && c.name].filter(Boolean).join(", ");
-    const scope = about ? `About ${about}` : "";
-    const reply = { who: "guide", text: "", pending: true };
-    guide.log.push({ who: "you", text: question, scope }, reply);
-    guide.busy = true;
-    renderGuideLog();
-    try {
-      const r = await post("/api/guide", { question, session: guide.session, clone: guide.clone });
-      Object.assign(reply, { text: r.answer, instant: r.instant, seconds: r.seconds, error: !!r.error, demo: !!r.demo });
-    } catch (err) {
-      Object.assign(reply, { text: err.message, error: true });
-    }
-    reply.pending = false;
-    guide.busy = false;
-    guide.log = guide.log.slice(-30);
-    saveGuide();
-    renderGuideLog();
-  }
-  $("guide-session").addEventListener("change", (ev) => { guide.session = ev.target.value; guide.clone = ""; renderGuide(); });
-  $("guide-clone").addEventListener("change", (ev) => { guide.clone = ev.target.value; renderGuide(); });
-  $("guide-quick").addEventListener("click", (ev) => {
-    const b = ev.target.closest("[data-ask]");
-    if (b) askGuide(b.dataset.ask);
-  });
-  $("guide-form").addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    const q = $("guide-q").value;
-    if (!q.trim() || guide.busy) return;
-    $("guide-q").value = "";
-    askGuide(q);
-  });
-  $("guide-clear").addEventListener("click", () => { guide.log = []; saveGuide(); renderGuideLog(); });
-
   /* ================================================================ messages */
-  function renderMessages(o) { renderFlow(o, $("flow-big")); }
+  // Every stored message and what became of it - from the database, so the
+  // page is full after a restart (live events are kept in memory only).
+  const MSG = { show: "all", limit: 60 };
+  const MSG_GROUPS = [["all", "All"], ["you", "From you"], ["telegram", "Telegram"], ["github", "GitHub"],
+    ["practice", "Practice runs"], ["dropped", "Dropped"]];
+  const FATE_ICON = { good: "route", said: "chat", faint: "funnel" };
+  async function renderMessages(o) {
+    renderFlow(o, $("flow-big"));
+    let d;
+    try { d = await api(`/api/messages?show=${encodeURIComponent(MSG.show)}&limit=${MSG.limit}`); } catch { return; }
+    setHTML($("msg-picker"), MSG_GROUPS.filter(([k]) => k === "all" || k === MSG.show || d.counts[k]).map(([k, label]) =>
+      `<button class="chip${k === MSG.show ? " on" : ""}" data-msgs="${k}" aria-pressed="${k === MSG.show}">
+        <span class="t">${label}</span><span class="n">${num(d.counts[k] || 0)}</span></button>`).join(""));
+    setHTML($("msg-list"), d.items.map((m) => `<div class="msg-row ${m.tone}">
+        <div class="msg-top"><span class="msg-ch">${esc(m.channel)}</span><b class="msg-who">${esc(m.author)}</b>
+          ${m.session ? `<a class="msg-where" href="/#chat=${encodeURIComponent(m.session.key)}" title="Open this session">${esc(short(m.session.title, 42))}</a>`
+            : m.thread ? `<span class="msg-where">${esc(short(m.thread, 42))}</span>` : ""}
+          <span class="msg-time" title="${esc(new Date(m.ts * 1000).toLocaleString())}">${since(m.ts)}</span></div>
+        <div class="msg-text">${esc(m.text)}</div>
+        ${m.skills.length ? `<div class="msg-skills">With your skill${m.skills.length > 1 ? "s" : ""}: ${m.skills.map(esc).join(", ")}</div>` : ""}
+        <div class="msg-fate"><span class="fe-icon">${icon(FATE_ICON[m.tone] || "clock")}</span><span>${esc(m.fate)}</span></div>
+      </div>`).join("") + (d.more ? '<button class="ghost more" data-msgs-more="1">Show older messages</button>' : "")
+      || `<p class="muted pad">${MSG.show === "all" ? "No messages yet. Write to Rimuru in the chat, or start a practice run."
+        : "None of these yet."}</p>`);
+  }
+  $("msg-picker").addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-msgs]");
+    if (!b || b.dataset.msgs === MSG.show) return;
+    Object.assign(MSG, { show: b.dataset.msgs, limit: 60 });
+    $("msg-list").scrollTop = 0;
+    if (state.overview) renderMessages(state.overview);
+  });
+  $("msg-list").addEventListener("click", (ev) => {
+    if (!ev.target.closest("[data-msgs-more]")) return;
+    MSG.limit += 60;
+    if (state.overview) renderMessages(state.overview);
+  });
 
   const MODES = [["candidate", "Read everything; the AI filter decides"],
     ["mention_only", "Only when someone mentions Rimuru"], ["ignore", "Ignore this channel"]];
@@ -797,13 +732,11 @@
     overview: [["feed-overview", null, 12]],
     rimuru: [["feed-rimuru", ["decide", "say"], 150]],
     watchdog: [["feed-watchdog", ["watch"], 80]],
-    messages: [["feed-messages", ["filter"], 200]],
   };
   const EMPTY = {
     "feed-overview": "Nothing yet. Things appear here the moment they happen.",
     "feed-rimuru": "Rimuru has not decided anything yet. Write to it in the chat.",
     "feed-watchdog": "Nothing yet. The watchdog only acts while clones are working.",
-    "feed-messages": "No messages yet.",
   };
   function renderFeeds() {
     state.feedsDirty = false;

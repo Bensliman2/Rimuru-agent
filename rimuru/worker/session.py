@@ -153,8 +153,11 @@ class WorkerAgent:
         where: str | None = None,
         guide: str = "",
         skills: list[Any] | None = None,
+        forced: list[Any] | None = None,
     ) -> None:
         self.task = task
+        # Skills the person forced for this job (/skill_<name>): in full, in the brief.
+        self.forced = list(forced or [])
         # The person's skills, as they stood when this clone began: the brief
         # lists them, use_skill() reads one (rimuru/skills.py).
         self.skills = [sk for sk in (skills or []) if sk.enabled]
@@ -247,8 +250,11 @@ class WorkerAgent:
             )
         if guide:
             brief += guide
-        if self.skills:
-            brief += skillbook.for_brief(self.skills)
+        if self.forced:
+            brief += skillbook.for_forced(self.forced)
+        others = [sk for sk in self.skills if sk.slug not in {f.slug for f in self.forced}]
+        if others:
+            brief += skillbook.for_brief(others)
         if memories:
             brief += memories.rstrip() + "\n\n"
         if resume_note:

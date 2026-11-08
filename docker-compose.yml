@@ -1,0 +1,69 @@
+# Rimuru in Docker.
+#
+#     docker compose up -d                 start it, then open http://localhost:8800
+#     docker compose logs -f rimuru        see what it is doing
+#     docker compose down                  stop it (your data stays)
+#
+# What is kept, on this computer, next to this file:
+#   rimuru-data/   chats, jobs, memories, session folders, your models and API keys (.env)
+#   skills/        your skills, one Markdown file each - edit them here or in the app
+#   projects/      put projects here for Rimuru to work on: pick /projects/<name> with
+#                  "Change" above the chat
+#
+# Two services:
+#   rimuru   the app. It answers only on this computer (port published on 127.0.0.1).
+#   sandbox  a Docker of Rimuru's own, where each clone's commands run in a sealed
+#            container: no internet, only that job's folder. It is "privileged" -
+#            Docker inside Docker needs that - but it is reachable only by the app,
+#            over compose's private network, with TLS certificates only they share.
+
+name: rimuru
+
+services:
+  rimuru:
+    build: .
+    image: rimuru:latest
+    restart: unless-stopped
+    depends_on:
+      sandbox:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8800:8800"
+      # Remote hands - another machine working for a session. Uncomment to let
+      # other machines on your network connect (only with a pairing code):
+      # - "8810:8810"
+    environment:
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+    volumes:
+      - ./rimuru-data:/rimuru/data
+      - ./skills:/rimuru/skills
+      - ./projects:/projects
+      - sandbox-certs:/certs/client:ro
+
+  sandbox:
+    image: docker:29-dind
+    restart: unless-stopped
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+    volumes:
+      # The same folders, at the same paths, as in the app: when a clone's
+      # container mounts /rimuru/data/sessions/<name>, it is the same folder.
+      - ./rimuru-data:/rimuru/data
+      - ./projects:/projects
+      - sandbox-certs:/certs/client
+      - sandbox-docker:/var/lib/docker
+    networks:
+      default:
+        aliases: [docker]   # the name the sandbox's TLS certificate is made for
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  sandbox-certs:    # TLS certificates the sandbox makes, for the app
+  sandbox-docker:   # the sandbox image and its layers, kept between restarts

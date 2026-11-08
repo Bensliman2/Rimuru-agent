@@ -454,8 +454,7 @@
       const pick = slash.items[slash.at];
       if ((e.key === "Tab" || e.key === "Enter") && pick && input.value.toLowerCase() !== `/${pick.name}`) {
         e.preventDefault();
-        input.value = `/${pick.name}`;
-        autosize(); slashUpdate();
+        pickCommand(pick);
         return;
       }
     }
@@ -464,12 +463,30 @@
   input.addEventListener("blur", () => { slash.open = false; $("slash-menu").hidden = true; });
 
   // Commands, typed after "/": a small menu shows what there is (/init).
-  let COMMANDS = [{ name: "init", about: "Study this session's folder and write RIMURU.md - a guide every clone reads first" }];
-  api("/api/commands").then((d) => { if (d.items && d.items.length) COMMANDS = d.items; }).catch(() => {});
+  // Commands, then one /skill_<name> per skill: typed before a message, it makes
+  // that message's job follow the skill. Fetched again whenever "/" is typed, so
+  // a skill added a moment ago is there.
+  let COMMANDS = [
+    { name: "status", about: "How this session's work is going - who is working on what, right now" },
+    { name: "init", about: "Study this session's folder and write RIMURU.md - a guide every clone reads first" }];
+  let commandsTs = 0;
+  const loadCommands = () => {
+    if (Date.now() - commandsTs < 3000) return;
+    commandsTs = Date.now();
+    api("/api/commands").then((d) => { if (d.items && d.items.length) { COMMANDS = d.items; slashUpdate(); } }).catch(() => {});
+  };
+  loadCommands();
+  // A skill is followed by the message: it is filled in with a space, and the
+  // person goes on typing. A command is complete as it is.
+  function pickCommand(c) {
+    input.value = c.skill ? `/${c.name} ` : `/${c.name}`;
+    autosize(); slashUpdate();
+  }
   const CMD_RE = /^\/[A-Za-z][A-Za-z0-9_-]{0,30}(?:@\w+)?$/;
   const slash = { open: false, items: [], at: 0, dismissed: null };
   function slashUpdate() {
     const v = input.value;
+    if (v === "/") loadCommands();
     const typed = /^\/([A-Za-z0-9_-]*)$/.exec(v);
     slash.items = typed ? COMMANDS.filter((c) => c.name.startsWith(typed[1].toLowerCase())) : [];
     slash.open = slash.items.length > 0 && slash.dismissed !== v && document.activeElement === input;
@@ -479,7 +496,7 @@
     menu.hidden = !slash.open;
     if (slash.open) {
       menu.innerHTML = slash.items.map((c, i) => `<button type="button" class="slash-item${i === slash.at ? " on" : ""}"
-        role="option" aria-selected="${i === slash.at}" data-cmd="${esc(c.name)}"><b>/${esc(c.name)}</b>
+        role="option" aria-selected="${i === slash.at}" data-cmd="${esc(c.name)}"><b>/${esc(c.name)}${c.skill ? " &hellip;" : ""}</b>
         <span>${esc(c.about)}</span></button>`).join("");
     }
   }
@@ -487,8 +504,8 @@
     e.preventDefault();                     // keep the typing box focused
     const b = e.target.closest("[data-cmd]");
     if (!b) return;
-    input.value = `/${b.dataset.cmd}`;
-    autosize(); slashUpdate();
+    const c = COMMANDS.find((x) => x.name === b.dataset.cmd);
+    if (c) pickCommand(c);
   });
   $("composer").addEventListener("submit", (e) => { e.preventDefault(); send(); });
 
@@ -1058,36 +1075,88 @@
   };
   const stateTag = (s) => { const [t, cls] = STATE[s] || [s, ""]; return `<span class="conn-state ${cls}">${esc(t)}</span>`; };
 
+  // Telegram, as four steps. Each says exactly what to do, and ticks itself off
+  // when it is done - steps 3 and 4 update by themselves while the panel is open.
+  function telegramSection(tg) {
+    const bot = tg.bot || "";
+    const botLink = bot ? `https://t.me/${encodeURIComponent(bot.replace(/^@/, ""))}` : "";
+    const connected = tg.token_set && !!bot && tg.state !== "problem";
+    const heard = tg.allowed.length + tg.strangers.length > 0;
+    const allowed = tg.allowed.length > 0;
+    const allow = tg.strangers.length ? `<ul class="conn-people">${tg.strangers.map((p) =>
+      `<li><span>${esc(p.name)}${p.username ? ` <span class="muted">@${esc(p.username)}</span>` : ""}</span>
+        <button class="primary small" data-tg-allow="${esc(p.id)}" data-name="${esc(p.name)}">Allow</button></li>`).join("")}</ul>` : "";
+    const tokenRow = (label) => `<div class="conn-row"><input type="password" id="tg-token" autocomplete="off" spellcheck="false"
+        placeholder="Paste the token here" aria-label="Telegram bot token">
+      <button class="primary small" data-act="tg-connect">${label}</button></div>`;
+    const steps = [
+      [tg.token_set, "Make your bot in Telegram", `
+        <p>Open <a href="https://t.me/BotFather" target="_blank" rel="noopener"><b>@BotFather</b></a> - Telegram's own
+          helper for making bots - and:</p>
+        <ol class="tg-do">
+          <li>send it <code>/newbot</code> <button class="copy-mini" data-copy="/newbot">Copy</button></li>
+          <li>give your bot a name - anything, like <i>My Rimuru</i></li>
+          <li>give it a username ending in <b>bot</b>, like <i>my_rimuru_bot</i></li>
+        </ol>
+        <p>BotFather answers with a <b>token</b>: a number, a colon and a long code, like
+          <code>123456789:AAH&hellip;</code>. Copy it.</p>`],
+      [connected, "Paste the token", `${tokenRow("Connect")}
+        <p class="conn-hint">It is kept in your .env file on this computer, and never shown again.</p>`],
+      [heard, "Say hi to your bot", `
+        <p>${botLink ? `Open <a href="${botLink}" target="_blank" rel="noopener"><b>${esc(bot)}</b></a>` : "Open your bot"}
+          in Telegram and press <b>Start</b> - or send it any message.</p>
+        <p class="conn-hint tg-wait">Waiting for your message&hellip; this updates by itself.</p>`],
+      [allowed, "Allow yourself", `${allow || '<p class="conn-hint">You appear here after step 3.</p>'}
+        <p class="conn-hint">Only the people you allow can give Rimuru work. Anyone else is told it is a private
+          assistant.</p>`],
+    ];
+    const now = steps.findIndex(([done]) => !done);
+    // Steps 1 and 2 go together: the token BotFather gives is pasted right below.
+    const open = (i) => i === now || (now === 0 && i === 1);
+    const list = `<ol class="tg-steps">${steps.map(([done, title, body], i) => `
+      <li class="tg-step ${done ? "tg-done" : open(i) ? "tg-now" : "tg-later"}">
+        <div class="tg-step-head"><span class="tg-n">${done ? '<svg><use href="#i-check"/></svg>' : i + 1}</span>
+          <b>${title}</b></div>
+        ${open(i) ? `<div class="tg-step-body">${body}</div>` : ""}</li>`).join("")}</ol>`;
+    const people = tg.allowed.length ? `<ul class="conn-people">${tg.allowed.map((p) =>
+      `<li><span>${esc(p.name)} <span class="muted">(${esc(p.id)})</span></span>
+        <button class="ghost small" data-tg-remove="${esc(p.id)}">Remove</button></li>`).join("")}</ul>` : "";
+    return `
+      <div class="conn-head"><h3>Telegram</h3>${stateTag(tg.state)}</div>
+      <p class="conn-what">Talk to Rimuru from your phone. Each Telegram chat is a session here too, with its own
+        folder and clones. Rimuru just does the job and tells you in plain words - it sends code or files only
+        when you ask.</p>
+      ${tg.problem ? `<p class="form-error">${esc(tg.problem)}</p>` : ""}
+      ${now === -1 ? `<div class="tg-ready"><svg><use href="#i-check"/></svg><div><b>Telegram is ready.</b>
+          Message <a href="${botLink}" target="_blank" rel="noopener">${esc(bot)}</a> the way you write here.
+          Type <code>/status</code> there to see how your work is going.</div></div>` : list}
+      ${now === -1 || now >= 3 ? `<h4 class="conn-sub">Who can give it work</h4>${people}${now === -1 ? allow : ""}
+        <label class="conn-check"><input type="checkbox" id="tg-groups" ${tg.groups ? "checked" : ""}>
+          Also answer in Telegram groups (only allowed people are heard)</label>` : ""}
+      ${tg.token_set ? `<details class="tg-more"><summary>Use another bot, or disconnect</summary>
+        ${tokenRow("Change")}<div class="conn-row"><button class="ghost small danger" data-act="tg-off">Disconnect Telegram</button></div>
+      </details>` : ""}`;
+  }
+  // While Telegram waits for the person (steps 3 and 4), check every few seconds.
+  function watchTelegram() {
+    clearInterval(C.watch);
+    C.watch = setInterval(async () => {
+      if ($("connections").hidden) { clearInterval(C.watch); return; }
+      const box = $("conn-tg");
+      if (!box || box.contains(document.activeElement)) return;      // never under the person's typing
+      let st;
+      try { st = await api("/api/connections"); } catch { return; }
+      const sig = JSON.stringify(st.telegram);
+      if (sig !== C.tgSig) { C.tgSig = sig; C.status = st; box.innerHTML = telegramSection(st.telegram); }
+    }, 4000);
+  }
+
   function renderConnections(st) {
     C.status = st;
+    C.tgSig = JSON.stringify(st.telegram);
     const tg = st.telegram, gh = st.github;
-    const people = tg.allowed.length
-      ? `<ul class="conn-people">${tg.allowed.map((p) => `<li><span>${esc(p.name)} <span class="muted">(${esc(p.id)})</span></span>
-          <button class="ghost small" data-tg-remove="${esc(p.id)}">Remove</button></li>`).join("")}</ul>`
-      : `<p class="conn-hint">Nobody yet. Send your bot a message in Telegram, then allow yourself below.</p>`;
-    const strangers = tg.strangers.length
-      ? `<h4 class="conn-sub">Asked to talk to Rimuru</h4><ul class="conn-people">${tg.strangers.map((p) =>
-          `<li><span>${esc(p.name)}${p.username ? ` <span class="muted">@${esc(p.username)}</span>` : ""} <span class="muted">(${esc(p.id)})</span></span>
-          <button class="primary small" data-tg-allow="${esc(p.id)}" data-name="${esc(p.name)}">Allow</button></li>`).join("")}</ul>` : "";
     $("conn-body").innerHTML = `
-      <section class="conn">
-        <div class="conn-head"><h3>Telegram</h3>${stateTag(tg.state)}</div>
-        <p class="conn-what">Chat with Rimuru from your phone. Each chat is a session here too, with its own folder and clones - and the files a job makes are sent to you.</p>
-        ${tg.problem ? `<p class="form-error">${esc(tg.problem)}</p>` : ""}
-        ${tg.bot ? `<p class="conn-hint">Your bot is <b>${esc(tg.bot)}</b>.</p>` : `
-        <ol class="conn-steps">
-          <li>In Telegram, open <b>@BotFather</b>, send <code>/newbot</code> and answer its two questions.</li>
-          <li>It gives you a token like <code>123456789:AAH...</code> - paste it here and press Connect.</li>
-          <li>Send your new bot a message, then allow yourself below.</li>
-        </ol>`}
-        <div class="conn-row"><input type="password" id="tg-token" autocomplete="off" spellcheck="false"
-            placeholder="${tg.token_set ? "Token saved - paste a new one to change it" : "Bot token"}" aria-label="Telegram bot token">
-          <button class="primary small" data-act="tg-connect">${tg.token_set ? "Change" : "Connect"}</button>
-          ${tg.token_set ? `<button class="ghost small danger" data-act="tg-off">Disconnect</button>` : ""}</div>
-        <h4 class="conn-sub">Who can give it work</h4>${people}${strangers}
-        <label class="conn-check"><input type="checkbox" id="tg-groups" ${tg.groups ? "checked" : ""}>
-          Also answer in Telegram groups (only allowed people are heard)</label>
-      </section>
+      <section class="conn" id="conn-tg">${telegramSection(tg)}</section>
       <section class="conn">
         <div class="conn-head"><h3>GitHub</h3>${stateTag(gh.state)}</div>
         <p class="conn-what">Rimuru answers on issues and pull requests when someone you allow writes <code>${esc(gh.mention)}</code> - and opens a <b>draft</b> pull request with its work. It never merges.</p>
@@ -1114,6 +1183,7 @@
     try {
       renderConnections(await api("/api/connections"));
       renderMachines(await api("/api/hands"));
+      watchTelegram();
     } catch (e) { $("conn-body").innerHTML = `<p class="form-error">${esc(e.message)}</p>`; }
   }
 

@@ -957,3 +957,60 @@ html { background: var(--bg); }
   .stop span { display: none; }
   .stop { padding: 7px 10px; }
 }
+
+/* ------------------------------------------------------------------ Telegram, step by step */
+.tg-steps { list-style: none; margin: 8px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.tg-step { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
+.tg-step.tg-now {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.tg-step.tg-done { background: var(--surface-2); }
+.tg-step.tg-done .tg-step-head b { color: var(--muted); font-weight: 600; }
+.tg-step.tg-later { opacity: .6; }
+.tg-step-head { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.tg-n {
+  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+  font-size: 12.5px; font-weight: 700; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
+}
+.tg-step.tg-now .tg-n { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.tg-step.tg-done .tg-n { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.tg-n svg { width: 14px; height: 14px; }
+.tg-step-body { margin: 8px 0 2px 34px; font-size: 13.5px; line-height: 1.55; }
+.tg-step-body p { margin: 0 0 8px; }
+.tg-step-body a { color: var(--accent-strong); }
+.tg-do { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.copy-mini {
+  margin-left: 6px; padding: 1px 9px; border-radius: 99px; cursor: pointer; font-size: 11.5px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--surface); color: var(--accent-strong);
+}
+.copy-mini:hover { border-color: var(--accent); }
+.tg-wait { animation: tg-wait 2.4s ease-in-out infinite; }
+@keyframes tg-wait { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.tg-ready {
+  display: flex; gap: 10px; align-items: flex-start; margin: 6px 0 4px; padding: 10px 12px;
+  border-radius: 12px; background: var(--ok-soft); font-size: 13.5px; line-height: 1.5;
+}
+.tg-ready svg { width: 18px; height: 18px; color: var(--ok); flex-shrink: 0; margin-top: 2px; }
+.tg-ready a { color: var(--accent-strong); font-weight: 600; }
+.tg-more { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.tg-more summary { cursor: pointer; width: fit-content; }
+.tg-more summary:hover { color: var(--text); }
+@media (max-width: 600px) { .tg-step-body { margin-left: 0; } }
+@media (prefers-reduced-motion: reduce) { .tg-wait { animation: none; } }
+
+/* Six things in the top bar on a phone: Rimuru's mark without its name, square
+   icon buttons, tighter gaps - so nothing is cut off. */
+@media (max-width: 480px) {
+  .bar { gap: 8px; padding: 10px 12px; }
+  .brand .name { display: none; }
+  .bar-right { gap: 6px; }
+  .bar-btn { padding: 7px; }
+}
+
+/* Five labeled buttons need about 1000px. Below that they show their icons (each
+   keeps its name as a tooltip), never wrapping or pushing Stop off the bar. */
+.bar-btn, .stop { white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 1080px) {
+  body:not(.hood-page) .bar-btn span { display: none; }
+  body:not(.hood-page) .bar-btn { padding: 7px 9px; }
+}

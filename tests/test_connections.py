@@ -18,7 +18,7 @@ from rimuru.channels.telegram import Problem, TelegramChannel
 from rimuru.config import Config
 from rimuru.connections import Settings
 from rimuru.ids import new_id
-from rimuru.models import Task
+from rimuru.models import Session, Task
 from rimuru.system import RimuruSystem
 
 
@@ -92,14 +92,18 @@ def test_a_wrong_telegram_token_is_said_plainly(tmp_path):
     asyncio.run(run())
 
 
-def test_files_a_job_made_are_sent_on_telegram(tmp_path, monkeypatch):
+def test_telegram_gets_the_job_done_not_code_unless_asked(tmp_path, monkeypatch):
+    """A job from Telegram ends in plain words: no files sent by themselves, code
+    left out of replies - until the person asks for it."""
     async def run():
         system = make_system(tmp_path)
-        docs = []
+        docs, texts = [], []
 
         def api(request: httpx.Request) -> httpx.Response:
             if request.url.path.endswith("sendDocument"):
                 docs.append(request.content)
+            elif request.url.path.endswith("sendMessage"):
+                texts.append(json.loads(request.content)["text"])
             return httpx.Response(200, json={"ok": True, "result": True})
 
         tg = TelegramChannel(token="1:x", settings=Settings(tmp_path / "c.json"), system=system,
@@ -110,12 +114,59 @@ def test_files_a_job_made_are_sent_on_telegram(tmp_path, monkeypatch):
         monkeypatch.setattr("rimuru.web.friendly.worker_card",
                             lambda *_a, **_k: {"files": ["index.html", "../outside.txt"]})
         worker = SimpleNamespace(session=SimpleNamespace(id="w"), root=work)
-        said = await tg.finish(worker, SimpleNamespace(key="tg-111"), "done", "Built it")
-        system.store.close()
-        return said, docs
+        note = await tg.finish(worker, SimpleNamespace(key="tg-111"), "done", "Built it")
+        assert docs == [] and "send_files only if they ask" in note, "files went out unasked"
 
-    said, docs = asyncio.run(run())
-    assert said == "sent on Telegram: index.html" and len(docs) == 1 and b"<h1>todo</h1>" in docs[0]
+        # Asked for them: the job's files, and nothing outside its folder.
+        thread = system.store.get_or_create_thread("telegram", "tg-111", "A to-do page")
+        clone = system.store.put_session(Session(id="wrk_files001", kind="worker", title="To-do",
+                                                         model="demo"))
+        task = system.store.put_task(Task(id=new_id("task"), title="Build a to-do page", brief="",
+                                          thread_id=thread.id, worker_id=clone.id, status="done",
+                                          folder=str(work)))
+        assert await tg.send_job_files(task) == ["index.html"]
+        assert len(docs) == 1 and b"<h1>todo</h1>" in docs[0]
+
+        # Code stays out of a reply unless the person's last message asked for it.
+        system.store.add_chat("user", "make the title blue", chat="tg-111")
+        await tg.deliver("tg-111", "Done - the title is blue.\n```css\nh1 { color: blue }\n```\nReload it.")
+        assert "color: blue" not in texts[-1] and "send me the code" in texts[-1] and "Reload it." in texts[-1]
+        system.store.add_chat("user", "can you send me the code?", chat="tg-111")
+        await tg.deliver("tg-111", "Here it is:\n```css\nh1 { color: blue }\n```")
+        assert "h1 { color: blue }" in texts[-1]
+        system.store.close()
+
+    asyncio.run(run())
+
+
+def test_telegram_greets_on_start_and_answers_status_at_once(tmp_path):
+    async def run():
+        system = make_system(tmp_path)
+        sent: list[dict] = []
+
+        def api(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("sendMessage"):
+                sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"ok": True, "result": True})
+
+        settings = Settings(tmp_path / "data" / "connections.json")
+        settings.allow(111, "Hamza")
+        tg = TelegramChannel(token="1:x", settings=settings, system=system,
+                             http=httpx.AsyncClient(transport=httpx.MockTransport(api)))
+        system.channels.register(tg)
+        steps = system.router.session.step_count
+
+        await tg.handle(private(111, "/start"))
+        assert sent[-1]["text"].startswith("Hi Hamza! I'm Rimuru") and "/status" in sent[-1]["text"]
+        await tg.handle(private(111, "/status"))
+        assert sent[-1]["text"] == "Nothing has been handed to a clone in this session yet."
+        assert system.router.loop.inbox.qsize() == 0 and system.router.session.step_count == steps, (
+            "a command must not cost a call to Rimuru")
+        lines = [(m["role"], m["text"]) for m in system.store.chat if m.get("chat") == "tg-111"]
+        assert lines[-2:] == [("user", "/status"), ("rimuru", sent[-1]["text"])], "the app shows it too"
+        system.store.close()
+
+    asyncio.run(run())
 
 
 # --------------------------------------------------------------------------- #

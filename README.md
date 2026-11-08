@@ -38,6 +38,28 @@ Then open **http://127.0.0.1:8800**.
   itself the first time (about a minute). Without Docker, clones can still read and
   write files but cannot run anything, and they say so.
 
+### Or in Docker
+
+```bash
+docker compose up -d
+```
+
+Then open **http://localhost:8800** - the same app, on this computer only. Two
+containers: Rimuru, and a Docker of its own (`sandbox`) where each clone's commands run
+sealed - no internet, only that job's folder. Everything is kept next to
+`docker-compose.yml`:
+
+| Folder | What is in it |
+|---|---|
+| `rimuru-data/` | chats, jobs, memories, session folders, your models and API keys |
+| `skills/` | your skills - edit them there or with the Skills button |
+| `projects/` | projects for Rimuru to work on: pick **Projects** when you click **Change** above the chat |
+
+`docker compose logs -f rimuru` shows what it is doing; `docker compose down` stops it
+and keeps your data. The `sandbox` container runs *privileged* (Docker inside Docker
+needs it) but only the app can reach it, over compose's private network, with TLS. On
+Linux, files clones make in `projects/` belong to root.
+
 ## Using it
 
 - **Type what you need** in the chat. Rimuru answers in plain words and tells you
@@ -62,6 +84,9 @@ Then open **http://127.0.0.1:8800**.
   **Open** shows it in File Explorer. A whole drive, your whole home folder, the
   system's folders and Rimuru's own folder are refused, and clones are told never
   to delete files of yours they did not make.
+- **/status: how is it going?** Type `/status` in a session (or on Telegram) for an
+  instant answer from the records - who is working on what, what is done, what did
+  not finish. No AI call, so it costs nothing and works even while Rimuru is busy.
 - **/init: a guide to your project.** In a session that works in your own project,
   type `/init` (typing `/` shows the commands). A clone studies the folder and writes
   `RIMURU.md` - what the project is, how it is organized, how to run and test it, its
@@ -72,7 +97,9 @@ Then open **http://127.0.0.1:8800**.
   write once - your code style, how you test, how you deploy. Each is its own file in
   `skills/` (edit them by hand if you like; `skills/README.md` shows the format). Every
   clone sees the list - each skill's name and when to use it - and reads one in full
-  only when it fits its job, so many skills cost almost nothing. Turn one off to keep it
+  only when it fits its job, so many skills cost almost nothing. To make sure a job
+  follows one, type it before your message: `/skill_web_pages build a landing page`
+  (typing `/` lists them). Turn one off to keep it
   without using it; a clone's details show which of your skills it used. Skills are
   instructions, not code: they give a clone no new powers. Keep passwords and keys out.
 - **Every clone has a name, a persona and a color** - Mika the amber one, Dax the mint
@@ -113,12 +140,13 @@ only use it knowingly.
 The **Connections** button (next to Models) connects Rimuru to the outside. Only the
 people you allow can give it work; tokens go into your `.env` and are never shown again.
 
-**Telegram - talk to Rimuru from your phone.** In Telegram, open @BotFather, send
-`/newbot`, and paste the token it gives you into Connections. Then send your bot a
-message: you appear in Connections - click **Allow**. Each private chat is a session
-like any other (listed in the app with a Telegram mark, with its own folder and
-clones), Rimuru's answers go back to Telegram, and the files a job makes are sent to
-you. Anyone else gets "this is a private assistant" - once. Groups are off unless you
+**Telegram - talk to Rimuru from your phone.** Connections walks you through four
+steps, each ticking itself off: make a bot with @BotFather (`/newbot`), paste its
+token, say hi to your bot, allow yourself. Each private chat is a session like any
+other (listed in the app with a Telegram mark, with its own folder and clones), and
+Rimuru's answers go back to Telegram - in plain words: it just does the job, and sends
+code or files only when you ask ("send me the files"). `/status` works there too.
+Anyone else gets "this is a private assistant" - once. Groups are off unless you
 switch them on, and even then only allowed people are heard.
 
 **GitHub - issues and pull requests.** Make a fine-grained token for just the
@@ -159,11 +187,10 @@ the same plain language as the chat - one view at a time:
 | View | What you see |
 |---|---|
 | Overview | Rimuru, the clones and the watchdog at a glance; what came in; the latest events; models and cost |
-| Guide | ask about your sessions and clones in plain words - how many are working, what each one is doing, why one stopped. Pick a session or a clone to narrow it down. Common questions are answered at once from the records, with no AI call; anything else by the watchdog's model, from what it can see |
 | Rimuru | what it is doing, what it decided and said, and its thoughts turn by turn - all of them, or only those about one session (a turn that handled two sessions shows under both). **Clear** clears turns from this log only: Rimuru keeps what it has in mind and the chat stays; to forget a session completely, delete the session |
 | Clones | every clone with its little slime, grouped by session; pick one to see its job, its commands and every turn |
-| Watchdog | its checks and interventions, and its notes - a quiet supervisor; questions go to the Guide |
-| Messages | what happened to every incoming message, and the rules for group chats, editable in plain words |
+| Watchdog | its checks and interventions, and its notes - a quiet supervisor |
+| Messages | every message that came in - your chat, Telegram, GitHub, practice runs - and what became of it, kept across restarts; and the rules for group chats, editable in plain words |
 | Memory | find anything by typing a word or two - a session, a job, a message - and everything Rimuru remembers, to change or forget |
 | Practice runs | scripted workloads - a busy team chat, a burst, a quiet day, two coding exercises |
 
@@ -301,8 +328,7 @@ rimuru/
   safety.py      finding hidden instructions aimed at AI tools
   connections.py who may give Rimuru work on Telegram and GitHub
   folders.py     picking a session's folder, safely
-  guide.py       the Guide: questions about sessions and clones
-  commands.py    commands typed in the chat: /init, and the project guide clones read
+  commands.py    commands typed in the chat: /status, /init, and the project guide clones read
   skills.py      your skills: one file each, listed for every clone, read when they fit
 config/          models.toml - your models (made by the Models button), and an example
 data/            your own data, never committed:
@@ -315,6 +341,6 @@ skills/          your skills, one Markdown file each - yours, not committed (see
 sandbox/         the container image clones run code in
 docs/            evaluation.md - the end-to-end evaluation and what to fix
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           111 automated checks
+tests/           114 automated checks
 run.py           serve | bench | verify | trace | eval | speed | hands
 ```

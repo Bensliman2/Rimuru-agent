@@ -224,6 +224,53 @@ def for_router(skills: Iterable[Skill]) -> str:
             + "; ".join(f"{s.name}" + (f" (when: {s.when})" if s.when else "") for s in usable) + ".")
 
 
+# ---------------------------------------------------------------------- #
+# /skill_<name>: the person forces a skill for one message
+# ---------------------------------------------------------------------- #
+_FORCE = re.compile(r"\s*/skill_([A-Za-z0-9][A-Za-z0-9_-]{0,60})(?:@\w+)?(?=\s|$)")
+
+
+def command_for(skill: Skill) -> str:
+    """How the person types it: /skill_web_pages. Underscores, so Telegram turns
+    it into a tappable command too."""
+    return "skill_" + slugify(skill.slug).replace("-", "_")
+
+
+def forced(text: str) -> tuple[list[str], str] | None:
+    """'/skill_web_pages /skill_tests build a page' -> (['web_pages', 'tests'],
+    'build a page'). None when the message does not start with /skill_."""
+    names: list[str] = []
+    rest = text or ""
+    while (found := _FORCE.match(rest)) is not None:
+        names.append(found.group(1))
+        rest = rest[found.end():]
+    return (names, rest.strip()) if names else None
+
+
+def resolve(folder: Path, names: Iterable[str]) -> tuple[list[Skill], list[str]]:
+    """The skills a person named (/skill_web_pages), and the names that match none."""
+    every = load_all(folder)
+    found: list[Skill] = []
+    missing: list[str] = []
+    for name in names:
+        skill = match(every, name.replace("_", "-"))
+        if skill is None:
+            missing.append(name)
+        elif skill not in found:
+            found.append(skill)
+    return found, missing
+
+
+def for_forced(skills: Iterable[Skill]) -> str:
+    """Skills the person asked for, for this job: in full, in the brief."""
+    chosen = list(skills)
+    if not chosen:
+        return ""
+    parts = [f'<<< {s.name}\n{s.text.strip()}\n>>>' for s in chosen]
+    return ("SKILLS THE PERSON ASKED FOR - they chose these for this job: follow them.\n"
+            + "\n".join(parts) + "\n\n")
+
+
 def used_names(steps: Iterable[Any]) -> list[str]:
     """The skills a clone read, in order, from its steps' tool calls."""
     seen: list[str] = []

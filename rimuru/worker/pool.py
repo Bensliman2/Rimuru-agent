@@ -176,6 +176,7 @@ class WorkerPool:
             where=where,
             guide=guide,
             skills=skillbook.load_all(self.config.skills_dir),
+            forced=skillbook.resolve(self.config.skills_dir, task.skills)[0] if task.skills else [],
         )
         self.workers[session.id] = worker
         self.store.update_task(task, worker_id=session.id, status="queued")

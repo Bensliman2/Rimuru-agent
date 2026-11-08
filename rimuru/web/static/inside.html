@@ -90,7 +90,6 @@
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z" fill="currentColor"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5zM5 20.5A2.5 2.5 0 0 0 7.5 23H19v-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
   <symbol id="i-route" viewBox="0 0 24 24"><path d="M5 6h7a4 4 0 0 1 0 8H9a3 3 0 0 0 0 6h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="5" cy="6" r="2" fill="currentColor"/><path d="M17 17l2.5 3-2.5 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-  <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15.6 8.4l-2.1 5.1-5.1 2.1 2.1-5.1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h12M12.5 6.5L18 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="13" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="13" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
 </svg>
@@ -108,7 +107,9 @@
       <span class="status-dot"></span><span id="status-text">Connecting</span>
       <span class="tip" id="status-tip" role="tooltip"></span>
     </span>
-    <a class="quiet-link" href="/">Back to the chat</a>
+    <a class="bar-btn" href="/" title="Back to your chat with Rimuru">
+      <svg><use href="#i-chat"/></svg><span>Back to the chat</span>
+    </a>
     <a class="bar-btn" href="/#models" title="Choose which AI does each job">
       <svg><use href="#i-sliders"/></svg><span>Models</span>
     </a>
@@ -121,7 +122,6 @@
 <div class="views-bar">
   <nav class="views" id="views" role="tablist" aria-label="Views">
     <button role="tab" data-view="overview" class="on"><svg><use href="#i-grid"/></svg>Overview</button>
-    <button role="tab" data-view="guide"><svg><use href="#i-compass"/></svg>Guide</button>
     <button role="tab" data-view="rimuru"><svg class="tab-mark"><use href="#mark-rimuru"/></svg>Rimuru</button>
     <button role="tab" data-view="clones"><svg class="tab-mark"><use href="#mark-clone"/></svg>Clones<span class="tab-badge" id="badge-clones" hidden></span></button>
     <button role="tab" data-view="watchdog"><svg><use href="#i-eye"/></svg>Watchdog</button>
@@ -159,30 +159,6 @@
           cheaper. The noise filter's calls are not counted yet.</p>
       </section>
     </div>
-  </section>
-
-  <!-- GUIDE -->
-  <section class="view" id="view-guide" role="tabpanel">
-    <section class="block guide">
-      <div class="who-head big">
-        <span class="who-icon"><svg><use href="#i-compass"/></svg></span>
-        <div><h2>Guide</h2><p class="muted">Ask about your sessions and clones in plain words: how
-          many are working, what each one is doing, why one stopped. Pick a session or a clone to
-          ask about just that one. Common questions are answered at once from the records; anything
-          else is answered by the watchdog's AI, from what it can see.</p></div>
-      </div>
-      <div class="guide-pick">
-        <label><span>Session</span><select id="guide-session" aria-label="Session to ask about"></select></label>
-        <label><span>Clone</span><select id="guide-clone" aria-label="Clone to ask about"></select></label>
-      </div>
-      <div class="chips guide-quick" id="guide-quick" aria-label="Quick questions"></div>
-      <div class="guide-log" id="guide-log" aria-live="polite"></div>
-      <form class="guide-ask" id="guide-form" autocomplete="off">
-        <input id="guide-q" maxlength="800" placeholder="Ask anything, for example: why did it stop?" aria-label="Your question">
-        <button class="primary" type="submit" id="guide-send"><svg><use href="#i-send"/></svg><span>Ask</span></button>
-      </form>
-      <div class="guide-foot"><button class="link small" id="guide-clear" hidden>Clear this conversation</button></div>
-    </section>
   </section>
 
   <!-- RIMURU -->
@@ -254,9 +230,8 @@
               running it rests and costs nothing.</p></div>
           </div>
           <dl class="facts" id="wd-facts"></dl>
-          <p class="wd-guide">Questions about your clones - how many are working, why one
-            stopped? <button class="link" data-go="guide">Ask the Guide</button>. It reads what
-            the watchdog noticed too.</p>
+          <p class="wd-guide">Want to know how your clones are doing? Type <b>/status</b>
+            in a session's chat - the answer comes at once, from the records.</p>
         </section>
         <section class="block">
           <div class="block-head"><h2>What it did</h2></div>
@@ -283,8 +258,12 @@
     </section>
     <div class="hood-grid">
       <section class="block">
-        <div class="block-head"><h2>What happened to each message</h2></div>
-        <div class="feed scroll" id="feed-messages"></div>
+        <div class="block-head"><h2>What happened to each message</h2>
+          <span class="hint-icon inline" tabindex="0" aria-label="About this list"><svg><use href="#i-info"/></svg>
+            <span class="tip">Every message that ever came in - your chat, Telegram, GitHub, practice
+              runs - newest first, with what became of it. Kept across restarts.</span></span></div>
+        <div class="chips" id="msg-picker" aria-label="Show the messages"></div>
+        <div class="scroll msg-list" id="msg-list"><p class="muted pad">Loading&hellip;</p></div>
       </section>
       <section class="block">
         <div class="block-head"><h2>Rules for group chats</h2></div>

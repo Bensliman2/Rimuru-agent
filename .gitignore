@@ -23,3 +23,7 @@ config/*.tmp
 # Your skills (skills/*.md) are yours too; only the folder's README is shared.
 skills/*
 !skills/README.md
+
+# Docker (docker-compose.yml): Rimuru's data and your projects, kept next to it
+rimuru-data/
+projects/

@@ -1,6 +1,6 @@
-"""Rimuru's turns by session (and clearing them), the Guide, /init and the
-project guide clones read first, and a color per clone. Offline: the demo
-model, or a scripted one."""
+"""Rimuru's turns by session (and clearing them); the commands typed in the
+chat - /status, /init, /skill_<name>; the project guide clones read first; the
+Messages page; a color per clone. Offline: the demo model."""
 from __future__ import annotations
 
 import asyncio
@@ -8,13 +8,10 @@ import json
 import time
 from pathlib import Path
 
-import pytest
 
-from rimuru import commands, persona
+from rimuru import commands, persona, skills
 from rimuru.config import Config
-from rimuru.guide import Guide
 from rimuru.ids import new_id
-from rimuru.llm.base import LLMResponse
 from rimuru.models import Task
 from rimuru.system import RimuruSystem
 
@@ -111,86 +108,6 @@ def test_rimurus_turns_are_grouped_by_session_and_clearing_keeps_its_mind(tmp_pa
         assert rows == after["total"]
 
 
-# ---------------------------------------------------------------------- the Guide
-def test_the_guide_answers_common_questions_from_the_records(tmp_path):
-    async def run():
-        system = make_system(tmp_path)
-        system.config.max_workers = 0          # the clones wait: their state is what this test sets
-        store = system.store
-        thread = store.get_or_create_thread("console", "s-guide001", "Two jobs")
-        other = store.get_or_create_thread("console", "s-other001", "Something else")
-        working = []
-        for title, th in (("Build a page", thread), ("Write a script", thread), ("Unrelated", other)):
-            task = store.put_task(Task(id=new_id("task"), title=title, brief="", thread_id=th.id))
-            session, _ = await system.pool.submit(task, thread_id=th.id)
-            working.append(session)
-        a, b, c = working
-        store.touch_session(a, status="thinking")
-        store.touch_session(b, status="done")
-        store.update_task(store.tasks[b.task_id], status="done", result="Wrote the script.",
-                          finished_ts=time.time())
-        guide = Guide(system)
-
-        everywhere = guide.instant("How many clones are working?")
-        assert everywhere.startswith("2 clones are working right now")
-        here = guide.instant("how many clones are working?", "s-guide001")
-        assert here.startswith(f"1 clone is working in this session right now: {a.name}.")
-        assert "1 more worked earlier" in here
-        each = guide.instant("What is each clone doing?", "s-guide001")
-        assert a.name in each and b.name not in each and c.name not in each
-        going = guide.instant("How is this session going?", "s-guide001")
-        assert going.startswith("1 of 2 jobs done, 1 in progress")
-        about_b = guide.instant(f"What is {b.name} doing?", None, b.id)
-        assert about_b.startswith(f"{b.name} (") and "Wrote the script." in about_b
-        assert guide.instant("Why is the sky blue?") is None
-
-        # Demo mode: no AI call for the rest - it says so plainly.
-        answer = await guide.answer("Why is the sky blue?")
-        assert answer["demo"] and not answer["instant"] and "demo mode" in answer["answer"]
-
-        # The facts the AI would answer from name clones, never internal IDs.
-        facts = guide.facts("s-guide001", b.id)
-        assert a.name in facts and b.name in facts and "Wrote the script." in facts
-        for prefix in ("wrk_", "thr_", "tsk_", "trg_"):
-            assert prefix not in facts
-        await system.stop()
-
-    asyncio.run(run())
-
-
-def test_the_guide_asks_the_ai_with_the_facts_when_it_must(tmp_path):
-    async def run():
-        system = make_system(tmp_path)
-        system.config.is_demo = lambda: False
-        seen = {}
-
-        async def complete(*, system: str, messages, tools, max_tokens=2048, role="worker"):
-            seen.update(system=system, prompt=messages[-1].as_text(), role=role, tools=tools)
-            return LLMResponse(text="Kai is still writing the page.")
-
-        system.watchdog.loop.client.complete = complete
-        thread = system.store.get_or_create_thread("console", "s-ai000001", "A page")
-        task = system.store.put_task(Task(id=new_id("task"), title="Build a page", brief="", thread_id=thread.id))
-        session, _ = await system.pool.submit(task, thread_id=thread.id)
-        answer = await Guide(system).answer("Why is it taking so long?", "s-ai000001", session.id)
-        assert answer == {"answer": "Kai is still writing the page.", "instant": False,
-                          "seconds": answer["seconds"]}
-        assert seen["role"] == "watchdog" and seen["tools"] == []
-        assert "Why is it taking so long?" in seen["prompt"] and session.name in seen["prompt"]
-        assert "Never show internal IDs" in seen["system"]
-        await system.stop()
-
-    asyncio.run(run())
-
-
-def test_the_guide_endpoint_checks_what_was_picked(tmp_path, monkeypatch):
-    with app_client(tmp_path, monkeypatch) as client:
-        assert client.post("/api/guide", json={"question": "how many clones?"}).json()["instant"] is True
-        gone = client.post("/api/guide", json={"question": "x", "session": "s-nope0001"})
-        assert gone.status_code == 404 and gone.json()["error"] == "That session is gone."
-        assert client.post("/api/guide", json={"question": "x", "clone": "wrk_nope"}).status_code == 404
-
-
 # ---------------------------------------------------------------------- /init
 def test_commands_are_told_apart_from_paths():
     assert commands.parse("/init") == "init"
@@ -230,7 +147,7 @@ def test_init_studies_the_folder_and_says_so_in_the_chat(tmp_path, monkeypatch):
         titles = {c["key"]: c["title"] for c in client.get("/api/chats").json()["items"]}
         assert titles["s-proj0001"] == "my-app"
         assert not any("RIMURU" in t for t in titles.values())
-        assert client.get("/api/commands").json()["items"][0]["name"] == "init"
+        assert [c["name"] for c in client.get("/api/commands").json()["items"]][:2] == ["status", "init"]
 
 
 def test_clones_read_the_project_guide_first(tmp_path):
@@ -300,3 +217,140 @@ def test_clone_cards_and_chat_lines_carry_the_color(tmp_path, monkeypatch):
                     if m["role"] == "event")
         assert line["color"] == card["color"] and line["clone"] == card["name"]
         assert json.dumps(system.store.sessions[card["id"]].to_dict())  # still serializable
+
+
+# ---------------------------------------------------------------------- /status
+def test_status_answers_at_once_from_the_records(tmp_path):
+    async def run():
+        system = make_system(tmp_path)
+        system.config.max_workers = 0          # the clones wait: their state is what this test sets
+        store = system.store
+        thread = store.get_or_create_thread("console", "s-stat0001", "Two jobs")
+        other = store.get_or_create_thread("console", "s-othr0001", "Something else")
+        assert commands.status_for(system, thread) == "Nothing has been handed to a clone in this session yet."
+        made = []
+        for title, th in (("Build a page", thread), ("Write a script", thread), ("Unrelated", other)):
+            task = store.put_task(Task(id=new_id("task"), title=title, brief="", thread_id=th.id))
+            session, _ = await system.pool.submit(task, thread_id=th.id)
+            made.append(session)
+        a, b, _c = made
+        store.touch_session(a, status="thinking")
+        store.touch_session(b, status="done")
+        store.update_task(store.tasks[b.task_id], status="done", result="Wrote it.", finished_ts=time.time())
+
+        said = commands.status_for(system, thread)
+        lines = said.splitlines()
+        assert lines[0] == "Working now (1):"
+        assert lines[1].startswith(f"- {a.name}: ") and '"Build a page"' in lines[1]
+        assert f'Done (1): "Write a script" ({b.name}).' in said
+        assert 'Elsewhere: 1 clone working in other sessions ("Unrelated").' in said  # named after its job
+        for prefix in ("wrk_", "thr_", "tsk_"):
+            assert prefix not in said, "no internal IDs in front of the person"
+        await system.stop()
+
+    asyncio.run(run())
+
+
+def test_status_in_the_chat_costs_no_call_to_rimuru(tmp_path, monkeypatch):
+    with app_client(tmp_path, monkeypatch) as client:
+        system = client.app.state.system
+        steps = system.router.session.step_count
+        said = client.post("/api/command", json={"chat": "s-stat0002", "text": "/status"}).json()
+        assert said["ok"] and said["said"] == "Nothing has been handed to a clone in this session yet."
+        # Typed as a message, a command is still a command.
+        again = client.post("/api/message", json={"text": "/status", "thread_key": "s-stat0002"}).json()
+        assert again["said"] == said["said"]
+        lines = [(m["role"], m["text"]) for m in client.get("/api/chat", params={"chat": "s-stat0002"}).json()["messages"]]
+        assert lines == [("user", "/status"), ("rimuru", said["said"])] * 2
+        assert system.router.session.step_count == steps and system.router.loop.inbox.qsize() == 0
+        unknown = client.post("/api/command", json={"chat": "s-stat0002", "text": "/guide"}).json()
+        assert not unknown["ok"] and "/status" in unknown["said"]
+        names = [c["name"] for c in client.get("/api/commands").json()["items"]]
+        assert names[:2] == ["status", "init"]
+
+
+# ---------------------------------------------------------------------- /skill_<name>
+def test_a_forced_skill_rides_with_the_message_into_the_job(tmp_path, monkeypatch):
+    from rimuru.config import CONFIG
+    from rimuru.context import inline_trigger
+
+    no_dice(monkeypatch)
+    with app_client(tmp_path, monkeypatch) as client:
+        system = client.app.state.system
+        skills.save(CONFIG.skills_dir, name="Web pages", when="Building a web page",
+                    text="- Check it at 375px wide\n- A label on every input")
+        listed = {c["name"]: c for c in client.get("/api/commands").json()["items"]}
+        assert listed["skill_web_pages"]["skill"] is True
+
+        sent = client.post("/api/message", json={"text": "/skill_web_pages Build a small page about cats",
+                                                  "thread_key": "s-skil0001"}).json()
+        assert sent["ok"] and sent["skills"] == ["Web pages"]
+        trigger = system.store.triggers[sent["trigger_id"]]
+        assert trigger.content == "Build a small page about cats" and trigger.meta["skills"] == ["Web pages"]
+        assert 'asked for their skill(s) for this: "Web pages"' in inline_trigger(trigger, system.store)
+        chat = client.get("/api/chat", params={"chat": "s-skil0001"}).json()["messages"]
+        assert chat[0]["text"] == "/skill_web_pages Build a small page about cats", "shown as typed"
+
+        assert wait_for(lambda: [t for t in system.store.tasks.values() if t.thread_id == trigger.thread_id])
+        task = next(t for t in system.store.tasks.values() if t.thread_id == trigger.thread_id)
+        assert task.skills == ["Web pages"], "the job got the skill without Rimuru having to remember it"
+        assert wait_for(lambda: system.store.transcript(task.worker_id or ""))
+        brief = system.store.transcript(task.worker_id)[0].injected
+        assert "SKILLS THE PERSON ASKED FOR" in brief and "375px" in brief and "A label on every input" in brief
+        card = next(c for c in client.get("/api/work").json()["cards"] if c["id"] == task.worker_id)
+        assert card["skills"][0] == "Web pages"
+
+        before = len(system.store.triggers)
+        unknown = client.post("/api/message", json={"text": "/skill_nope do something",
+                                                     "thread_key": "s-skil0001"}).json()
+        assert not unknown["ok"] and unknown["said"].startswith("There is no skill called 'nope'.")
+        assert "/skill_web_pages" in unknown["said"] and len(system.store.triggers) == before
+        bare = client.post("/api/command", json={"chat": "s-skil0001", "text": "/skill_web_pages"}).json()
+        assert "Write what you want done after it" in bare["said"]
+
+
+def test_a_relayed_message_carries_the_forced_skill_to_a_working_clone(tmp_path):
+    from types import SimpleNamespace
+
+    from rimuru.models import Trigger
+
+    async def run():
+        system = make_system(tmp_path)
+        system.config.max_workers = 0          # the clone waits, so its inbox can be read
+        skills.save(system.config.skills_dir, name="How we test", text="- A test that failed before the fix")
+        thread = system.store.get_or_create_thread("console", "s-rely0001", "A fix")
+        task = system.store.put_task(Task(id=new_id("task"), title="Fix it", brief="", thread_id=thread.id))
+        clone, _ = await system.pool.submit(task, thread_id=thread.id)
+        trigger = system.store.put_trigger(Trigger(id=new_id("trigger"), channel="console", thread_key="s-rely0001",
+                                                   author="you", kind="human_direct", content="also check the login",
+                                                   thread_id=thread.id, meta={"skills": ["How we test"]}))
+        turn = SimpleNamespace(turn_events=[SimpleNamespace(trigger_id=trigger.id)])
+        done = await system.router._tool_message_worker({"worker_id": clone.id, "text": "Also check the login."}, turn)
+        assert done == f"Delivered to {clone.id}."
+        inbox = system.pool.workers[clone.id].loop.inbox
+        texts = [inbox.get_nowait().text for _ in range(inbox.qsize())]
+        assert "SKILLS THE PERSON ASKED FOR" in texts[-1] and "A test that failed before the fix" in texts[-1]
+        await system.stop()
+
+    asyncio.run(run())
+
+
+# ---------------------------------------------------------------------- Messages page
+def test_the_messages_page_is_full_after_a_restart(tmp_path, monkeypatch):
+    no_dice(monkeypatch)
+    with app_client(tmp_path, monkeypatch) as client:
+        system = client.app.state.system
+        client.post("/api/message", json={"text": "Build a small page about cats", "thread_key": "s-msgs0001"})
+        client.post("/api/message", json={"text": "Write a haiku about dogs", "thread_key": "s-msgs0002"})
+        assert wait_for(lambda: all(t.route for t in system.store.triggers.values()))
+
+    with app_client(tmp_path, monkeypatch) as client:      # the same data, a fresh start
+        page = client.get("/api/messages").json()
+        assert [m["text"] for m in page["items"]] == ["Write a haiku about dogs", "Build a small page about cats"]
+        assert page["counts"]["all"] == 2 and page["counts"]["you"] == 2 and page["counts"]["dropped"] == 0
+        first = page["items"][1]
+        assert first["channel"] == "Your chat" and first["author"] == "You"
+        assert first["session"]["key"] == "s-msgs0001" and first["fate"].startswith("Reached Rimuru")
+        assert client.get("/api/messages", params={"show": "dropped"}).json()["items"] == []
+        o = client.get("/api/overview").json()
+        assert o["filter"]["seen"] == 2 and o["routing"]["direct"] == 2 and o["routing"]["to_router"] == 2

@@ -36,7 +36,6 @@ from .. import persona
 from .. import sessions as chats
 from ..ids import new_id
 from ..models import Memory
-from ..guide import Guide
 from ..system import RimuruSystem
 from . import friendly
 
@@ -74,7 +73,6 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
 
     app = FastAPI(title="Rimuru Super-agent", docs_url="/api/docs", lifespan=lifespan)
     app.state.system = system
-    guide = Guide(system)
 
     # The app stores API keys and can point models at any server, so it answers
     # only this computer: no other website may drive it (cross-site requests),
@@ -565,6 +563,62 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             items = [t for t in items if t["verdict"] == verdict]
         return {"items": items[:limit]}
 
+    # ------------------------------------------------------------------ #
+    # Under the hood -> Messages: every message that came in, and its fate
+    # ------------------------------------------------------------------ #
+    CHANNEL_NAMES = {"console": "Your chat", "telegram": "Telegram", "telegram-group": "Telegram group",
+                     "gh": "GitHub", "github": "GitHub (practice)", "im": "Team chat (practice)"}
+    MESSAGE_GROUPS = {
+        "you": lambda t: t.kind == "human_direct",
+        "telegram": lambda t: t.channel.startswith("telegram"),
+        "github": lambda t: t.channel == "gh",
+        "practice": lambda t: t.channel in {"im", "github"},
+        "dropped": lambda t: t.verdict in {"dropped_fast", "dropped_slow"},
+    }
+
+    def message_fate(t) -> tuple[str, str]:
+        """What happened to a message, in words - and a tone for the page."""
+        if t.verdict == "dropped_fast":
+            return f"Dropped by a simple rule: {friendly.plain(t.verdict_reason) or 'noise'}", "faint"
+        if t.verdict == "dropped_slow":
+            return f"The AI filter judged it noise: {friendly.plain(t.verdict_reason) or 'nothing to do'}", "faint"
+        if t.route == "passthrough":
+            names = [persona.of(w)[0] for w in (system.store.sessions.get(i) for i in t.routed_to) if w]
+            return f"Went straight to {', '.join(names) or 'a clone'} - the clone already on it", "good"
+        if t.route == "router":
+            started = [x for x in system.store.tasks.values() if x.origin_trigger_id == t.id]
+            if started:
+                clone = system.store.sessions.get(started[0].worker_id or "")
+                who = persona.of(clone)[0] if clone else "a clone"
+                return f"Reached Rimuru, who put {who} on it: “{started[0].title}”", "good"
+            return ("Reached Rimuru" + (" - your message, straight through" if t.kind == "human_direct" else
+                                        " - the AI filter let it through")), "said"
+        return "Waiting to be looked at", ""
+
+    @app.get("/api/messages")
+    async def list_messages(show: str = "all", limit: int = 60, before: float | None = None) -> dict[str, Any]:
+        """Every stored message, newest first - so the page is full after a restart."""
+        every = sorted(system.store.triggers.values(), key=lambda t: t.ts, reverse=True)
+        counts = {"all": len(every), **{k: sum(1 for t in every if f(t)) for k, f in MESSAGE_GROUPS.items()}}
+        picked = [t for t in every if show == "all" or MESSAGE_GROUPS.get(show, lambda _t: False)(t)]
+        if before is not None:
+            picked = [t for t in picked if t.ts < before]
+        conv = system.config.conversation_channels
+        items = []
+        for t in picked[:max(1, min(limit, 200))]:
+            fate, tone = message_fate(t)
+            thread = system.store.threads.get(t.thread_id or "")
+            items.append({
+                "id": t.id, "ts": t.ts, "channel": CHANNEL_NAMES.get(t.channel, t.channel),
+                "author": "You" if t.kind == "human_direct" and t.channel == "console" else t.author,
+                "text": friendly.plain(t.content)[:400], "fate": fate, "tone": tone,
+                "skills": t.meta.get("skills") or [],
+                "session": ({"key": thread.key, "title": chats.title_of(system.store, thread)}
+                            if thread is not None and thread.channel in conv else None),
+                "thread": thread.title if thread is not None and thread.channel not in conv else "",
+            })
+        return {"items": items, "counts": counts, "more": len(picked) > len(items)}
+
     @app.get("/api/threads")
     async def threads() -> dict[str, Any]:
         items = sorted(
@@ -904,18 +958,20 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
             raise HTTPException(400, "empty message")
         key = str(payload.get("thread_key") or "direct")
         # Typed in the app on a Telegram session: it stays that conversation, and
-        # Rimuru's answer goes to Telegram as well.
-        trigger = await system.human_message(
-            text,
-            channel=str(payload.get("channel") or channel_of(key)),
-            thread_key=key,
-        )
-        return {"ok": True, "trigger_id": trigger.id}
+        # Rimuru's answer goes to Telegram as well. A command (/status) or a skill
+        # forced for this message (/skill_web_pages ...) is handled on the way.
+        return await system.person_says(text, channel=str(payload.get("channel") or channel_of(key)),
+                                        thread_key=key)
 
     @app.get("/api/commands")
     async def list_commands() -> dict[str, Any]:
-        """What can be typed after "/" in the chat."""
-        return {"items": commands.COMMANDS}
+        """What can be typed after "/" in the chat: the commands, then one
+        /skill_<name> for each skill - typed before a message, it makes that
+        message's job use the skill."""
+        usable = [s for s in skillbook.load_all(system.config.skills_dir) if s.enabled]
+        return {"items": commands.COMMANDS + [
+            {"name": skillbook.command_for(s), "about": f"Use your skill “{s.name}” for this message",
+             "skill": True} for s in usable]}
 
     @app.post("/api/command")
     async def run_command(payload: dict[str, Any]) -> dict[str, Any]:
@@ -993,23 +1049,6 @@ def create_app(*, speed: float = 4.0, autostart: str | None = None) -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - say so; the path can still be copied
             raise HTTPException(400, f"Could not open it: {exc}") from None
         return {"ok": True, "folder": str(folder)}
-
-    @app.post("/api/guide")
-    async def ask_guide(payload: dict[str, Any]) -> dict[str, Any]:
-        """Under the hood -> Guide: a question about a session and/or a clone."""
-        session = str(payload.get("session") or "").strip() or None
-        clone = str(payload.get("clone") or "").strip() or None
-        if session and session_thread(session) is None:
-            raise HTTPException(404, "That session is gone.")
-        worker = system.store.sessions.get(clone or "")
-        if clone and (worker is None or worker.kind != "worker"):
-            raise HTTPException(404, "That clone is gone.")
-        try:
-            return await guide.answer(payload.get("question"), session, clone)
-        except Exception as exc:                        # the AI service refused or failed
-            return {"answer": "I could not reach the AI just now, so I cannot answer that one "
-                              f"({friendly.plain(str(exc))[:160]}). The quick questions still work.",
-                    "instant": False, "error": True}
 
     @app.post("/api/watchdog/ask")
     async def watchdog_ask(payload: dict[str, Any]) -> dict[str, Any]:

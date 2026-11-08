@@ -16,6 +16,7 @@ button in the app. API keys live in .env.
 from __future__ import annotations
 
 import argparse
+import os
 import asyncio
 import subprocess
 import sys
@@ -63,7 +64,10 @@ def serve(args: argparse.Namespace) -> int:
               f"(or edit {config.models_path.name} in config/).")
     print()
 
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    # In a container the server must listen on every address of the container
+    # (RIMURU_BIND=0.0.0.0) for its published port to reach it - while the app
+    # still answers only as localhost (RIMURU_HOST and RIMURU_ALLOWED_HOSTS).
+    uvicorn.run(app, host=os.environ.get("RIMURU_BIND") or host, port=port, log_level="warning")
     return 0
 
 

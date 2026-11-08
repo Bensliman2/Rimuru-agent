@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    # The keys the Models and Connections panels save: in .env here - or where
+    # RIMURU_ENV_FILE says (in Docker: the data folder, so they survive a rebuild).
+    load_dotenv(os.environ.get("RIMURU_ENV_FILE") or None)
 except Exception:  # pragma: no cover - dotenv is optional at runtime
     pass
 

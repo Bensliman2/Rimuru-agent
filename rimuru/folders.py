@@ -104,6 +104,10 @@ def places() -> list[dict[str, str]]:
         out += [{"label": d.rstrip("\\"), "path": d} for d in drives if not d.upper().startswith(("A:", "B:"))]
     else:
         out.append({"label": "Computer", "path": "/"})
+    # In Docker (docker-compose.yml) projects are shared with Rimuru here.
+    projects = Path(os.environ.get("RIMURU_PROJECTS", "/projects"))
+    if os.name != "nt" and projects.is_dir():
+        out.insert(1, {"label": "Projects", "path": str(projects)})
     return out
 
 

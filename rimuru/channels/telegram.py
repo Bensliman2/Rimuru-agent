@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,14 @@ log = logging.getLogger("rimuru.telegram")
 
 MAX_TEXT = 4000            # Telegram allows 4096 characters per message
 MAX_FILE = 10 * 1024 * 1024
+# Code blocks in a reply, and the words that mean the person wants code or files.
+_FENCED = re.compile(r"```.*?(?:```|$)", re.S)
+_ASKED = re.compile(r"\b(code|source|file|files|script|snippet|send|show me|paste)\b", re.I)
+LEFT_OUT = "(I left the code out - say \"send me the code\" if you want it.)"
+WELCOME = ("Hi {name}! I'm Rimuru, your assistant. Tell me what you'd like built or fixed, and I'll "
+           "put one of my clones on it - I'll tell you here when it's done.\n\n"
+           "/status - how your work is going\n"
+           "Type /skill_ and a skill's name before a message to make the job follow one of your skills.")
 
 
 class Problem(RuntimeError):
@@ -136,13 +145,16 @@ class TelegramChannel:
             if private:
                 await self.send(chat_id, "I can only read text messages for now.")
             return
-        if private and commands.parse(text) == "init":
-            # The same /init as in the app; other commands (/start) are just messages.
-            done = await self.system.run_command(f"tg-{chat_id}", text, channel="telegram")
-            await self.send(chat_id, done["said"])
+        if private and commands.parse(text) in {"start", "help"}:
+            # Telegram sends /start when someone first opens the bot: greet them,
+            # no AI call needed.
+            await self.send(chat_id, WELCOME.format(name=name))
         elif private:
-            await self.system.human_message(text, channel="telegram", thread_key=f"tg-{chat_id}",
-                                            author=name)
+            # The same as in the app: /status, /init, /skill_<name> before a message.
+            done = await self.system.person_says(text, channel="telegram", thread_key=f"tg-{chat_id}",
+                                                 author=name)
+            if done.get("said"):
+                await self.send(chat_id, done["said"])
         elif self.settings.tg.get("groups"):
             await self.system.ingest(Trigger(
                 id=new_id("trigger"), channel="telegram-group", thread_key=f"tg-group-{chat_id}",
@@ -156,23 +168,45 @@ class TelegramChannel:
                             disable_web_page_preview=True)
 
     async def deliver(self, thread_key: str, text: str) -> str:
+        # On a phone, code is noise: Rimuru says what it did in plain words. Code
+        # goes out only when the person asked for it (their last message).
+        if "```" in text and not self.asked_for_code(thread_key):
+            text = _FENCED.sub(LEFT_OUT, text).strip()
         await self.send(thread_key.removeprefix("tg-"), text)
         # The same session is in the app too: keep its chat there complete.
         self.system.store.add_chat("rimuru", text, chat=thread_key)
         return text
 
+    def asked_for_code(self, thread_key: str) -> bool:
+        said = next((m["text"] for m in reversed(self.system.store.chat)
+                     if m.get("chat") == thread_key and m["role"] == "user"), "")
+        return bool(_ASKED.search(said))
+
     # ------------------------------------------------------------------ #
     async def finish(self, worker: Any, thread: Any, outcome: str, summary: str) -> str:
-        """When a job from Telegram is done, send the files it made: on a phone,
-        a folder on the computer is out of reach."""
+        """A job from Telegram is done. Its files stay on the computer: they are
+        sent only when the person asks (Rimuru's send_files) - just the job, done,
+        and a plain-words answer."""
+        return ("on Telegram: files not sent - tell the person what was done in plain words; "
+                "send_files only if they ask for the files or the code")
+
+    async def send_job_files(self, task: Any) -> list[str]:
+        """Send the files a finished job made, as attachments - when the person asked."""
+        from ..hands import remote
         from ..web.friendly import worker_card
 
-        card = worker_card(self.system.store, worker.session, self.system.config.conversation_channels)
-        sent = []
-        for rel in (card.get("files") or [])[:3]:
-            path = (Path(worker.root) / rel).resolve()
+        store = self.system.store
+        worker = store.sessions.get(task.worker_id or "")
+        thread = store.threads.get(task.thread_id or "")
+        if worker is None or thread is None or not task.folder or remote.parse(task.folder):
+            return []
+        root = Path(task.folder).resolve()
+        card = worker_card(store, worker, self.system.config.conversation_channels)
+        sent: list[str] = []
+        for rel in (card.get("files") or [])[:5]:
+            path = (root / rel).resolve()
             try:
-                path.relative_to(Path(worker.root).resolve())
+                path.relative_to(root)
             except ValueError:
                 continue
             if not path.is_file() or path.stat().st_size > MAX_FILE:
@@ -186,7 +220,7 @@ class TelegramChannel:
                     sent.append(path.name)
             except httpx.HTTPError:
                 continue
-        return f"sent on Telegram: {', '.join(sent)}" if sent else ""
+        return sent
 
 
 class TelegramGroupChannel:

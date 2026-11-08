@@ -110,6 +110,7 @@ class Task:
     attempt: int = 1              # +1 for each automatic resume after a restart
     folder: str = ""              # where its clone worked, even if the session moves later
     resume_mark: int | None = None  # its clone's step count when last resumed
+    skills: list[str] = field(default_factory=list)  # skills the person forced (/skill_<name>)
 
     @property
     def duration(self) -> float | None:

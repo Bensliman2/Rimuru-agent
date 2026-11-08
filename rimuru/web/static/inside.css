@@ -384,69 +384,8 @@ h3.mini {
 .tag.about { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600;
   max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 
-/* ------------------------------------------------------------------ the Guide */
-.guide { max-width: 880px; width: 100%; }
-.guide-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 12px; }
-.guide-pick label {
-  display: flex; flex-direction: column; gap: 5px; min-width: 0;
-  font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
-}
-.guide-pick select {
-  width: 100%; font: inherit; font-size: 13.5px; font-weight: 500; letter-spacing: 0; text-transform: none;
-  color: var(--text); padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
-  background: var(--surface-2); cursor: pointer; transition: border-color .15s, background-color .15s;
-}
-.guide-pick select:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
-.guide-pick select:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
-.guide-pick select:disabled { color: var(--faint); cursor: default; }
-.guide-quick { margin: 0 0 12px; }
-.guide-quick .chip { padding: 6px 13px; max-width: 100%; }
-.guide-log {
-  display: flex; flex-direction: column; gap: 14px; min-height: 200px; max-height: calc(100vh - 480px);
-  overflow-y: auto; padding: 16px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border);
-}
-.g-empty { margin: auto; }
-.g-msg { display: flex; gap: 10px; max-width: 86%; }
-.g-msg.you { align-self: flex-end; flex-direction: column; align-items: flex-end; }
-.g-bubble { padding: 9px 13px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
-.g-msg.you .g-bubble { background: var(--user); color: #fff; border-radius: 14px 14px 4px 14px; }
-.g-msg.guide .g-bubble {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 14px 14px 14px 4px;
-  box-shadow: 0 1px 2px rgba(15, 27, 45, .04);
-}
-.g-msg.err .g-bubble { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
-.g-bubble p { margin: 0; }
-.g-bubble p + p, .g-bubble p + ul, .g-bubble ul + p { margin-top: 6px; }
-.g-bubble ul { margin: 4px 0 0; padding-left: 18px; }
-.g-bubble li + li { margin-top: 3px; }
-.g-meta { font-size: 11.5px; color: var(--faint); margin-top: 4px; }
-.g-main { min-width: 0; }
-.g-icon {
-  display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; margin-top: 2px;
-  border-radius: 10px; background: var(--accent-soft); color: var(--accent);
-}
-.g-icon svg { width: 17px; height: 17px; }
-.g-dots { display: inline-flex; gap: 4px; padding: 6px 0; }
-.g-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); animation: blink 1.2s infinite ease-in-out; }
-.g-dots i:nth-child(2) { animation-delay: .2s; }
-.g-dots i:nth-child(3) { animation-delay: .4s; }
-.guide-ask { display: flex; gap: 8px; margin-top: 12px; }
-.guide-ask input {
-  flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text);
-  padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface);
-  transition: border-color .15s, box-shadow .15s;
-}
-.guide-ask input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.guide-ask .primary { display: inline-flex; align-items: center; gap: 6px; border-radius: 12px; padding: 0 18px; }
-.guide-ask .primary svg { width: 16px; height: 16px; }
-.guide-foot { display: flex; justify-content: flex-end; min-height: 22px; margin-top: 6px; }
+/* the watchdog's pointer to /status */
 .wd-guide { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 13.5px; line-height: 1.5; }
-.wd-guide .link { font-weight: 650; }
-@media (max-width: 600px) {
-  .guide-pick { grid-template-columns: minmax(0, 1fr); }
-  .g-msg { max-width: 100%; }
-  .guide-log { max-height: 60vh; }
-}
 
 /* ------------------------------------------------------------------ buttons and tabs, polished */
 .views { gap: 4px; padding: 8px 20px; }
@@ -496,3 +435,25 @@ h3.mini {
 @media (prefers-reduced-motion: reduce) {
   .row, .clone-row, .mem-clone, .who, .chip, .hood-page .ghost { transition: none; transform: none !important; }
 }
+
+/* ------------------------------------------------------------------ messages: every one, and its fate */
+.msg-list { display: flex; flex-direction: column; gap: 8px; }
+.msg-row { padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.msg-row.faint { background: var(--surface-2); }
+.msg-row.faint .msg-text { color: var(--muted); }
+.msg-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.msg-ch {
+  padding: 1px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 650;
+  background: var(--accent-soft); color: var(--accent-strong);
+}
+.msg-who { font-size: 13px; }
+.msg-where { color: var(--muted); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+a.msg-where:hover { color: var(--accent-strong); text-decoration: underline; }
+.msg-time { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; }
+.msg-text { margin: 5px 0 6px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg-skills { font-size: 12px; color: var(--accent-strong); margin: -2px 0 6px; }
+.msg-fate { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.msg-fate .fe-icon { width: 24px; height: 24px; border-radius: 8px; }
+.msg-fate .fe-icon svg { width: 13px; height: 13px; }
+.msg-row.good .msg-fate .fe-icon { background: var(--ok-soft); color: var(--ok); }
+.msg-row.said .msg-fate .fe-icon { background: var(--accent-soft); color: var(--accent); }

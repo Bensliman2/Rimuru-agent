@@ -1,0 +1,76 @@
+/* The first start: choosing what Rimuru thinks with. */
+/* Nothing chosen yet: only the choices are on the page. */
+body.needs-setup .bar-right, body.needs-setup .sessions-toggle, body.needs-setup .sessions, body.needs-setup .clones, body.needs-setup .demo-banner, body.needs-setup .folder-bar, body.needs-setup .messages, body.needs-setup .composer {
+  display: none;
+}
+body.needs-setup .app { grid-template-columns: minmax(0, 1fr); max-width: 680px; }
+.setup {
+  margin: auto;
+  width: 100%;
+  max-width: 580px;
+  padding: 28px 20px;
+  text-align: center;
+  overflow-y: auto;
+}
+.setup h1 { font-size: 24px; font-weight: 650; letter-spacing: -.01em; }
+.setup-lead { color: var(--muted); margin: 8px 0 20px; }
+.setup-choices { display: flex; flex-direction: column; gap: 10px; text-align: start; }
+.setup-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.setup-choice.main {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--accent-soft);
+}
+.setup-text { flex: 1 1 240px; min-width: 0; }
+.setup-text b { font-size: 14.5px; font-weight: 650; }
+.setup-text p { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
+.setup-row { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 8px; }
+.setup-row select, .setup-row input {
+  flex: 1 1 170px;
+  min-width: 0;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.setup-row input { flex-grow: 2; }
+.setup-skip {
+  margin-top: 16px;
+  padding: 6px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: underline;
+}
+.setup-skip:hover { color: var(--accent); }
+.setup .form-error { margin: 0 0 12px; }
+.setup-bad { list-style: none; margin: 0 0 16px; padding: 0; color: var(--bad); font-size: 13.5px; }
+.setup-bad b { color: var(--text); }
+.setup-again { max-width: 420px; margin: 0 auto 14px; }
+.setup-wait {
+  width: 22px;
+  height: 22px;
+  margin: 4px auto 0;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: setup-spin .9s linear infinite;
+}
+@keyframes setup-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-wait { animation-duration: 3s; }
+}

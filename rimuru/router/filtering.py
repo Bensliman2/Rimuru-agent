@@ -17,6 +17,7 @@ and expensive, so we borrow Fast Path / Slow Path:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -299,6 +300,7 @@ class EventFilter:
                 )
         except Exception as exc:
             # Fail open: a filter outage must not make the agent deaf.
+            logging.getLogger("rimuru.filter").warning("the AI filter failed, letting it through", exc_info=True)
             return V_ACCEPTED, f"semantic stage unavailable ({type(exc).__name__}), admitting"
 
         return parse_verdict(response.text)

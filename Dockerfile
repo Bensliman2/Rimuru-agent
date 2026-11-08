@@ -24,6 +24,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
+RUN chmod +x docker-entrypoint.sh
 
 # Listen on the container's own addresses, so the published port reaches the
 # app - but answer only as localhost. docker-compose.yml publishes the port on
@@ -35,6 +36,9 @@ ENV RIMURU_BIND=0.0.0.0 \
     RIMURU_MODELS=/rimuru/data/models.toml \
     RIMURU_SKILLS=/rimuru/skills
 EXPOSE 8800 8810
+
+# Runs as you, not as root: see docker-entrypoint.sh.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8800/api/overview', timeout=4)"

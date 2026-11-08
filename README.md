@@ -60,8 +60,10 @@ sealed - no internet, only that job's folder. Everything is kept next to
 
 `docker compose logs -f rimuru` shows what it is doing; `docker compose down` stops it
 and keeps your data. The `sandbox` container runs *privileged* (Docker inside Docker
-needs it) but only the app can reach it, over compose's private network, with TLS. On
-Linux, files clones make in `projects/` belong to root.
+needs it) but only the app can reach it, over compose's private network, with TLS. The
+app and the clones run as whoever owns this folder, not as root, so on Linux the files in
+those folders are yours (`PUID` and `PGID`, in a `.env` next to the compose file, choose
+someone else).
 
 ## Using it
 
@@ -329,10 +331,11 @@ What each of the old limits is now, and what is still true:
 - **Long-term memory matches words, not meaning.** A memory comes back when the turn
   shares words with it (or when it is about you or the session); something that was
   only true for a while stays until it is changed or forgotten.
-- **The bigger toolbox and on-demand installs are not yet checked live:** Docker
-  Desktop was not running, so the image build and the two sandbox tests for them wait
-  for it. Python packages must have ready-made versions (wheels); nothing is built
-  from source.
+- **Python packages must have ready-made versions (wheels);** nothing is built from
+  source when a clone installs one.
+- **The app's own words are in English:** the buttons, `/status`, the Telegram welcome.
+  Rimuru and its clones answer in your language, and names, memory and safety checks
+  work in any language - with extra care for French and Arabic.
 - **When a free AI service's limit runs out,** Rimuru keeps retrying quietly, and the
   person is not yet told why it went silent (found in the user test).
 
@@ -348,12 +351,15 @@ rimuru/
   hands/         the remote hands: a session working on another machine
   llm/           catalog.py (which model does which job), Kimi / OpenAI-compatible,
                  Claude, and the offline demo model
-  web/           the chat app (static/index.html) and Under the hood (/inside)
+  web/           routes/ (the API, one file per feature) and static/ (the two pages,
+                 with js/ and css/ one file per feature)
   context.py     Inline & Spill
   recall.py      Chain of Recall
   store.py       durable state: chat history, saved conversations, memories
   memory.py      long-term memory: what is kept, and what comes back when
-  safety.py      finding hidden instructions aimed at AI tools
+  safety.py      finding hidden instructions aimed at AI tools, keeping keys in
+  text.py        finding and comparing words, in any language
+  logs.py        data/rimuru.log: what went wrong quietly, keys taken out
   connections.py who may give Rimuru work on Telegram and GitHub
   folders.py     picking a session's folder, safely
   commands.py    commands typed in the chat: /status, /init, and the project guide clones read
@@ -361,6 +367,7 @@ rimuru/
 config/          models.toml - your models (made by the Models button), and an example
 data/            your own data, never committed:
   rimuru.db        everything Rimuru remembers - chats, jobs, every step
+  rimuru.log       what went wrong quietly, if something seems off
   sessions/        Rimuru's folder for each session that did not pick its own
   practice/        where practice runs play
   github/          working copies of your repositories, for GitHub work

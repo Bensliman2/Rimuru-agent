@@ -456,7 +456,7 @@ class MockClient(LLMClient):
 
         if messages and _is_tool_turn(messages[-1]):
             if self.pending_question and "=== health report ===" in last:
-                question, self.pending_question = self.pending_question, None
+                self.pending_question = None
                 live = len(re.findall(r"^\[wrk_", last, re.M))
                 flags = WORKER_FLAG_RE.findall(last)
                 failed = re.search(r"failed sessions: (.*)", last)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 from collections import deque
 from typing import Any, Awaitable, Callable
@@ -38,6 +39,8 @@ def compact(event: dict[str, Any]) -> dict[str, Any]:
         else:
             out[key] = value
     return out
+
+log = logging.getLogger("rimuru.bus")
 
 
 class Bus:
@@ -76,7 +79,7 @@ class Bus:
                 q.put_nowait(event)
             except asyncio.QueueFull:
                 # A slow UI client must never stall the engine: drop the oldest.
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(asyncio.QueueEmpty, asyncio.QueueFull):
                     q.get_nowait()
                     q.put_nowait(event)
 
@@ -84,6 +87,7 @@ class Bus:
             try:
                 result = handler(event)
             except Exception:  # a broken listener must not take down the engine
+                log.warning("a listener for %s failed", topic, exc_info=True)
                 continue
             if asyncio.iscoroutine(result):
                 try:

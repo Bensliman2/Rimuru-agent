@@ -10,6 +10,9 @@
 #   projects/      put projects here for Rimuru to work on: pick /projects/<name> with
 #                  "Change" above the chat
 #
+# All of it belongs to whoever owns this folder, not to root (PUID and PGID, in a
+# .env next to this file, choose someone else).
+#
 # Two services:
 #   rimuru   the app. It answers only on this computer (port published on 127.0.0.1).
 #   sandbox  a Docker of Rimuru's own, where each clone's commands run in a sealed
@@ -36,6 +39,8 @@ services:
       DOCKER_HOST: tcp://docker:2376
       DOCKER_TLS_VERIFY: "1"
       DOCKER_CERT_PATH: /certs/client
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
     volumes:
       - ./rimuru-data:/rimuru/data
       - ./skills:/rimuru/skills

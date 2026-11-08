@@ -1,0 +1,171 @@
+/* Connections: Telegram, GitHub, other machines. */
+.conn { padding: 4px 0 18px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+.conn:last-child { border-bottom: 0; margin-bottom: 0; }
+.conn-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.conn-head h3 { font-size: 15.5px; font-weight: 650; }
+.conn-state {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.conn-state.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.conn-state.bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.conn-state.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.conn-what { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 4px 0 10px; }
+.conn-hint { font-size: 13px; color: var(--muted); margin: 6px 0; }
+.conn-steps {
+  margin: 6px 0 12px 18px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.conn-steps a { color: var(--accent); overflow-wrap: anywhere; }
+.conn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+#connections .conn-row input { flex: 1 1 220px; width: auto; min-width: 0; }
+.conn-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+#connections .conn-field textarea {
+  width: 100%;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  resize: vertical;
+}
+#connections .conn-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.conn-sub {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 14px 0 6px;
+}
+.conn-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.conn-people li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13.5px;
+}
+.conn-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+#connections .conn-check input { width: auto; }
+/* other machines: the pairing box */
+.pairing {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px dashed var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+.pairing p { font-size: 13px; margin: 0 0 6px; }
+.pairing pre {
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.tg-steps {
+  list-style: none;
+  margin: 8px 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tg-step {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+.tg-step.tg-now {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.tg-step.tg-done { background: var(--surface-2); }
+.tg-step.tg-done .tg-step-head b { color: var(--muted); font-weight: 600; }
+.tg-step.tg-later { opacity: .6; }
+.tg-step-head { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.tg-n {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.tg-step.tg-now .tg-n { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.tg-step.tg-done .tg-n { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.tg-n svg { width: 14px; height: 14px; }
+.tg-step-body { margin: 8px 0 2px 34px; font-size: 13.5px; line-height: 1.55; }
+.tg-step-body p { margin: 0 0 8px; }
+.tg-step-body a { color: var(--accent-strong); }
+.tg-do { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.tg-wait { animation: tg-wait 2.4s ease-in-out infinite; }
+@keyframes tg-wait { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.tg-ready {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 6px 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--ok-soft);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.tg-ready svg { width: 18px; height: 18px; color: var(--ok); flex-shrink: 0; margin-top: 2px; }
+.tg-ready a { color: var(--accent-strong); font-weight: 600; }
+.tg-more { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.tg-more summary { cursor: pointer; width: fit-content; }
+.tg-more summary:hover { color: var(--text); }
+
+@media (max-width: 600px) {
+  .tg-step-body { margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tg-wait { animation: none; }
+}

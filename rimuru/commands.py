@@ -13,6 +13,7 @@ organized without rediscovering it.
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -56,6 +57,7 @@ async def project_guide(files: Any) -> tuple[str, str] | None:
         try:
             text = await files.read(name)
         except Exception:  # noqa: BLE001 - not there, not readable, machine offline
+            logging.getLogger("rimuru.commands").debug("could not read %s", name, exc_info=True)
             text = None
         if text and text.strip():
             return name, text

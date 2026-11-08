@@ -135,7 +135,7 @@ class _Client:
 def tried(monkeypatch, answer, seconds=60.0):
     monkeypatch.setattr(catalog, "make_client", lambda entry, concurrency=4: _Client(answer))
     entry = catalog.ModelEntry(name="m", provider="groq", model="x")
-    return asyncio.run(catalog.try_model(entry, seconds=seconds))
+    return asyncio.run(catalog.try_model(entry, seconds=seconds, pause=0))
 
 
 def test_trying_a_model_says_what_went_wrong(monkeypatch):
@@ -145,6 +145,23 @@ def test_trying_a_model_says_what_went_wrong(monkeypatch):
     assert "did not accept" in tried(monkeypatch, ProviderAccountError("key", "Groq"))["problem"]
     leaked = tried(monkeypatch, RuntimeError(f"bad request with {KEY}"))["problem"]
     assert KEY not in leaked, "an error can quote the key"
+    said = tried(monkeypatch, RuntimeError('HTTP 400 from https://x/y: {"error":{"message":"The model is busy."}}'))
+    assert said["problem"] == "The model is busy.", "what it said, not the JSON around it"
+
+
+def test_a_stumble_gets_one_more_try(monkeypatch):
+    answers = [RuntimeError("hiccup"), SimpleNamespace(tool_calls=[object()])]
+
+    class Twice(_Client):
+        async def complete(self, **_kw):
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    monkeypatch.setattr(catalog, "make_client", lambda entry, concurrency=4: Twice(None))
+    entry = catalog.ModelEntry(name="m", provider="groq", model="x")
+    assert asyncio.run(catalog.try_model(entry, pause=0))["ok"] and not answers
 
 
 def test_a_sensible_first_model(monkeypatch):

@@ -1,0 +1,263 @@
+/* The conversation: messages, what happened in it, and the typing box. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scroll-behavior: smooth;
+}
+.welcome { margin: auto; max-width: 460px; text-align: center; padding: 24px 8px; }
+.welcome-mark { width: 72px; height: 72px; margin: 0 auto 14px; }
+.welcome h1 { font-size: 24px; font-weight: 650; letter-spacing: -.01em; }
+.welcome p { color: var(--muted); margin: 8px 0 20px; }
+.examples { display: flex; flex-direction: column; gap: 8px; }
+.examples button {
+  text-align: left;
+  padding: 11px 14px;
+  border-radius: 11px;
+  cursor: pointer;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 14px;
+}
+.examples button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.msg { display: flex; gap: 10px; max-width: 82%; }
+.msg .avatar { width: 30px; height: 30px; flex-shrink: 0; margin-top: 2px; }
+.msg .bubble {
+  /* "anywhere": a long folder path wraps instead of widening the whole chat. */
+  padding: 10px 14px;
+  border-radius: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+  text-align: start;
+  /* each line reads in its own direction: Arabic right to left */;
+}
+.msg .time { font-size: 11.5px; color: var(--faint); margin-top: 3px; }
+.msg.rimuru .bubble {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-top-left-radius: 5px;
+}
+.msg.user { align-self: flex-end; flex-direction: row-reverse; }
+.msg.user .bubble { background: var(--user); color: #fff; border-top-right-radius: 5px; }
+.msg.user .time { text-align: right; }
+.bubble code {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.msg.user .bubble code { background: rgba(255, 255, 255, .18); }
+.event {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  font-size: 13px;
+  max-width: 92%;
+}
+.event:hover { border-color: var(--accent); }
+.event svg { width: 18px; height: 18px; flex-shrink: 0; }
+.event span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event.done {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 25%, transparent);
+}
+.event.failed, .event.cancelled {
+  background: var(--surface-2);
+  color: var(--muted);
+  border-color: var(--border);
+}
+.event .check { width: 15px; height: 15px; }
+.typing { display: flex; gap: 10px; align-items: center; }
+.typing .avatar { width: 30px; height: 30px; }
+.dots {
+  display: inline-flex;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-top-left-radius: 5px;
+}
+.dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+  animation: blink 1.2s infinite ease-in-out;
+}
+.dots i:nth-child(2) { animation-delay: .15s; }
+.dots i:nth-child(3) { animation-delay: .3s; }
+.composer {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  position: relative;
+}
+.composer textarea {
+  flex: 1;
+  resize: none;
+  max-height: 180px;
+  min-height: 46px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  outline: none;
+  line-height: 1.45;
+}
+.composer textarea:focus { border-color: var(--accent); background: var(--surface); }
+.send {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+.send svg { width: 20px; height: 20px; }
+.send:disabled { background: var(--surface-2); color: var(--faint); cursor: default; }
+.demo-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 16px 0;
+  padding: 9px 12px 9px 14px;
+  border-radius: 12px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 13.5px;
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--border));
+}
+.save-banner {
+  margin: 12px 16px 0;
+  padding: 9px 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  background: var(--bad-soft);
+  color: var(--bad);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, var(--border));
+}
+.demo-banner button {
+  margin-left: auto;
+  padding: 5px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--warn);
+  font-weight: 650;
+  font-size: 13px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+}
+.folder-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 9px 14px 9px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.fb-icon { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
+.fb-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+.fb-label, .fb-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-label { font-size: 13.5px; font-weight: 600; }
+.fb-path { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+/* Rimuru keeping a lasting fact: a quiet line in the chat, linked to Memory */
+a.event { text-decoration: none; }
+.event.memory { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+.event.memory:hover { color: var(--accent-strong); border-color: var(--accent); }
+.event.memory a { color: inherit; text-decoration: none; }
+.event.memory a:hover { text-decoration: underline; }
+.event.memory .forget {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.event.memory .forget:hover {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--border));
+}
+.event.memory.gone, .event.memory.forgot { opacity: .7; }
+.event.memory.gone a { text-decoration: line-through; }
+.slash-menu {
+  position: absolute;
+  left: 16px;
+  right: 72px;
+  bottom: calc(100% - 8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+.slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.slash-item b { font-family: var(--mono); font-size: 13px; color: var(--accent-strong); flex-shrink: 0; }
+.slash-item span { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.slash-item.on, .slash-item:hover { background: var(--accent-soft); }
+.msg-from { font-size: 12px; font-weight: 650; color: var(--accent-strong); margin: 0 0 2px 2px; }
+.from-clone .avatar { width: 34px; height: 34px; }
+
+@media (max-width: 760px) {
+  .chat { height: calc(100vh - 140px); min-height: 460px; }
+  .msg { max-width: 92%; }
+}
+
+@media (max-width: 640px) {
+  .messages { padding: 18px 14px 10px; }
+  .composer { padding: 12px; }
+  .folder-bar { padding: 8px 10px 8px 12px; gap: 8px; }
+  .fb-path { display: none; }
+}

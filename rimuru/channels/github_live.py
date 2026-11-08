@@ -35,6 +35,7 @@ from ..ids import new_id
 from ..models import Trigger
 from ..safety import has_secret, scrubbed, secret_file
 from .base import ASYNC_NORMS
+from ..logs import noted
 
 log = logging.getLogger("rimuru.github")
 
@@ -111,7 +112,7 @@ class GitHubChannel:
             self.task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self.task
-        with contextlib.suppress(Exception):
+        with noted("closing the GitHub connection", logging.DEBUG):
             await self.http.aclose()
 
     async def _poll(self) -> None:
@@ -129,6 +130,7 @@ class GitHubChannel:
                 if "did not accept" in str(exc):
                     return                          # waits for a new token (Connections)
             except Exception as exc:  # noqa: BLE001
+                log.warning("checking GitHub failed", exc_info=True)
                 self.state, self.problem = "problem", type(exc).__name__
             await asyncio.sleep(self.interval)
 

@@ -13,7 +13,6 @@ and tasks.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import re
 import time
@@ -38,6 +37,7 @@ from .connections import Connections
 from .hands.hub import HandsHub
 from .safety import PASTED_KEY_NOTE, notice_for_person, redact
 from . import commands, sessions as chats
+from .logs import noted
 from . import skills as skillbook
 from .sessions import title_from, title_of
 from .router.filtering import EventFilter
@@ -637,7 +637,7 @@ class RimuruSystem:
     async def _every_minute(self) -> None:
         while True:
             await asyncio.sleep(30)
-            with contextlib.suppress(Exception):
+            with noted("the minute's housekeeping"):
                 self.warn_about_quota()
                 self.pool.sweep_warm()
 
@@ -654,7 +654,7 @@ class RimuruSystem:
         """Once at start and once a day: old jobs keep their summary and result,
         and the raw detail of each step stops taking up room."""
         while True:
-            with contextlib.suppress(Exception):
+            with noted("trimming old jobs' details"):
                 await asyncio.to_thread(self.store.trim_old_details, self.keep_details_days())
             await asyncio.sleep(86400)
 

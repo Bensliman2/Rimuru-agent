@@ -45,9 +45,11 @@ def _apply_args(args: argparse.Namespace):
 def serve(args: argparse.Namespace) -> int:
     import uvicorn
 
+    from rimuru import logs
     from rimuru.web.app import create_app
 
     config = _apply_args(args)
+    logs.setup(config.db_path.parent)
     try:
         app = create_app(speed=args.speed, autostart=args.scenario)
     except RuntimeError as exc:

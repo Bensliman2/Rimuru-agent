@@ -13,7 +13,8 @@ from typing import Any, Iterator
 
 from fastapi import FastAPI, HTTPException
 
-from ..llm import catalog
+from ...llm import catalog
+from ..shared import Web
 
 
 @contextlib.contextmanager
@@ -31,7 +32,9 @@ def _trying_key(name: str, value: str) -> Iterator[None]:
             os.environ[name] = before
 
 
-def add_routes(app: FastAPI, system: Any) -> None:
+def add_routes(app: FastAPI, web: Web) -> None:
+    system = web.system
+
     @app.get("/api/setup")
     async def setup_options() -> dict[str, Any]:
         """The choices on the first-start screen."""

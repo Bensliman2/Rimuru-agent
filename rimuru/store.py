@@ -15,6 +15,7 @@ history (StepCache, JobRecords).
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -38,6 +39,8 @@ from .models import (
     from_dict,
     now,
 )
+
+log = logging.getLogger("rimuru.store")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS triggers (
@@ -193,6 +196,8 @@ class Store:
         self.bus = bus
         self._lock = threading.RLock()
         self._closed = False
+        self.save_problem = ""               # said to the person while it is true
+        self._save_logged = 0.0
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         # A commit no longer waits for the disk each time, and reading never waits
         # for a write. An app crash loses nothing; a power cut at most the last moments.
@@ -321,9 +326,19 @@ class Store:
             try:
                 self._conn.execute(sql, tuple(params))
                 self._conn.commit()
-            except sqlite3.Error:
-                # Durability is not worth taking a live session down for.
-                pass
+            except sqlite3.Error as exc:
+                self._could_not_save(exc)     # not worth taking a live session down for
+            else:
+                self.save_problem = ""
+
+    def _could_not_save(self, exc: sqlite3.Error) -> None:
+        """The work carries on, but the person has to know it is not being kept."""
+        reason = "the disk is full" if "disk is full" in str(exc) else str(exc)
+        self.save_problem = (f"Rimuru cannot save right now: {reason}. It keeps working, but what "
+                             f"happens from now on would be lost if it restarted.")
+        if time.time() - self._save_logged > 60:
+            self._save_logged = time.time()
+            log.error("could not write to the database: %s", exc)
 
     def close(self) -> None:
         with self._lock:

@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import itertools
 import json
+import logging
 import os
 import secrets
 import socket
@@ -22,6 +23,10 @@ from typing import Any
 
 # At module level: the route's annotation must resolve (annotations are postponed).
 from fastapi import FastAPI, WebSocket
+
+from ..logs import noted
+
+log = logging.getLogger("rimuru.hands")
 
 CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # no 0/O, 1/I: read aloud safely
 CODE_LIFE = 600.0
@@ -117,12 +122,12 @@ class HandsHub:
 
     async def stop(self) -> None:
         for link in list(self.links.values()):
-            with contextlib.suppress(Exception):
+            with noted("closing a machine's connection", logging.DEBUG):
                 await link.ws.close()
         if self._server is not None:
             self._server.should_exit = True
         if self._serving is not None:
-            with contextlib.suppress(Exception):
+            with noted("stopping the machines' port", logging.DEBUG):
                 await asyncio.wait_for(self._serving, 5)
 
     # ------------------------------------------------------------------ #
@@ -154,6 +159,7 @@ class HandsHub:
         try:
             hello = json.loads(await asyncio.wait_for(ws.receive_text(), 15))
         except Exception:  # noqa: BLE001
+            log.info("a machine connected and never said who it was", exc_info=True)
             await ws.close(code=1008)
             return
 
@@ -175,7 +181,7 @@ class HandsHub:
                 if future is not None and not future.done():
                     future.set_result(message)
         except Exception:  # noqa: BLE001 - disconnected
-            pass
+            log.info("machine %s disconnected", machine_id, exc_info=True)
         finally:
             if self.links.get(machine_id) is link:
                 del self.links[machine_id]
@@ -238,7 +244,7 @@ class HandsHub:
         """No answer needed (e.g. stop a job)."""
         link = self.links.get(machine_id)
         if link is not None:
-            with contextlib.suppress(Exception):
+            with noted(f"telling a machine to {op}"):
                 await link.ws.send_text(json.dumps({"id": 0, "op": op, **args}))
 
     async def remove(self, machine_id: str) -> None:
@@ -246,7 +252,7 @@ class HandsHub:
         self._save()
         link = self.links.pop(machine_id, None)
         if link is not None:
-            with contextlib.suppress(Exception):
+            with noted("closing a removed machine's connection", logging.DEBUG):
                 await link.ws.close()
 
     def status(self) -> dict[str, Any]:

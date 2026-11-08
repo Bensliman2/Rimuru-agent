@@ -1,0 +1,164 @@
+/* The design tokens, the reset, and what every part of both pages uses. */
+:root {
+  --bg: #F5F7FA;
+  --surface: #FFFFFF;
+  --surface-2: #F0F4F8;
+  --border: #E2E8F0;
+  --text: #0F1B2D;
+  --muted: #5A6A7E;
+  --faint: #8A98AA;
+  --accent: #2380B8;
+  --accent-strong: #1B6A9A;
+  --accent-soft: #E4F3FB;
+  --user: #1F6FA3;
+  --ok: #157A42;
+  --ok-soft: #E6F6EC;
+  --warn: #A55A07;
+  --warn-soft: #FDF2E2;
+  --bad: #B42318;
+  --bad-soft: #FDECEA;
+  --shadow: 0 1px 2px rgba(15, 27, 45, .05), 0 6px 20px rgba(15, 27, 45, .06);
+  --radius: 14px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  --on-accent: #FFFFFF;
+}
+* { box-sizing: border-box; }
+/* Component display rules must never beat the hidden attribute. */
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+button, textarea { font: inherit; color: inherit; }
+h1, h2 { margin: 0; }
+svg { display: block; }
+.tip {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 300px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: normal;
+  text-align: left;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity .15s, transform .15s;
+}
+:hover > .tip, :focus-visible > .tip, :focus-within > .tip { opacity: 1; transform: none; }
+@keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+.hint-icon { position: relative; color: var(--faint); cursor: help; }
+.hint-icon svg { width: 18px; height: 18px; }
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.icon-btn svg { width: 18px; height: 18px; }
+.ghost {
+  padding: 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.ghost.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+.ghost.danger:hover { background: var(--bad-soft); }
+.primary {
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 0;
+  cursor: pointer;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
+  font-size: 14px;
+}
+.primary:hover:not(:disabled) { background: var(--accent-strong); }
+.primary:disabled { background: var(--surface-2); color: var(--faint); cursor: default; }
+.form-error { color: var(--bad); font-size: 13px; }
+.copy {
+  padding: 2px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.copy:hover { border-color: var(--accent); }
+.ghost.small { padding: 5px 11px; font-size: 13px; border-radius: 9px; flex-shrink: 0; }
+.ghost:hover:not(:disabled) { border-color: var(--accent); }
+.ghost:disabled { color: var(--faint); cursor: default; }
+.primary.small { padding: 6px 12px; font-size: 13px; }
+/* The chat and Under the hood fade into each other; the top bar stays put. */
+@view-transition { navigation: auto; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .18s; }
+html { background: var(--bg); }
+.copy-mini {
+  margin-left: 6px;
+  padding: 1px 9px;
+  border-radius: 99px;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--accent-strong);
+}
+.copy-mini:hover { border-color: var(--accent); }
+.ghost.small.danger { color: var(--bad); }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0C1218;
+    --surface: #121B24;
+    --surface-2: #17222D;
+    --border: #233140;
+    --text: #E5EDF5;
+    --muted: #93A4B7;
+    --faint: #6B7D91;
+    --accent: #5CBCE8;
+    --accent-strong: #7FCDF0;
+    --accent-soft: #11303F;
+    --user: #2B7DB0;
+    --ok: #4FC27F;
+    --ok-soft: #12291D;
+    --warn: #E3A44A;
+    --warn-soft: #2C2213;
+    --bad: #F07067;
+    --bad-soft: #2E1715;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+    --on-accent: #06202E;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,112 @@
+/* Where a session works: the folder picker. */
+/* where a session's files are, and a button to copy the full path */
+.folder-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.folder-line svg { width: 16px; height: 16px; color: var(--accent); }
+.folder-line code {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.fp-choices { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.fp-choice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.fp-choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+#folders .fp-choice input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  padding: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.fp-choice b { display: block; font-size: 14px; }
+.fp-choice span span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+  line-height: 1.45;
+}
+.fp-places { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.fp-place {
+  padding: 4px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.fp-place:hover, .fp-place.on {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+.fp-where { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+#fp-up svg { transform: rotate(-90deg); }
+#fp-up:disabled { opacity: .4; cursor: default; }
+.fp-current { min-width: 0; display: flex; flex-direction: column; }
+.fp-current b { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-current span { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.fp-list {
+  max-height: min(320px, 40vh);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.fp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  cursor: pointer;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  text-align: left;
+}
+.fp-row:last-child { border-bottom: 0; }
+.fp-row:hover, .fp-row:focus-visible { background: var(--accent-soft); outline: none; }
+.fp-row svg { width: 17px; height: 17px; color: var(--accent); flex-shrink: 0; }
+.fp-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-row .chev { margin-left: auto; color: var(--faint); }
+.fp-empty { padding: 14px 12px; color: var(--muted); font-size: 13px; }
+.fp-new { display: flex; gap: 8px; margin-top: 10px; }
+#folders .fp-new input { flex: 1; min-width: 0; width: auto; }
+.fp-warn {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent);
+}

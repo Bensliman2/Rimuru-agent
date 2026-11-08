@@ -1,0 +1,134 @@
+/* The top bar: the name, the status, the buttons and Stop. */
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  view-transition-name: topbar;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand .mark { width: 36px; height: 36px; }
+.brand .name { font-weight: 650; font-size: 17px; letter-spacing: .01em; }
+.brand .tagline { color: var(--muted); font-size: 12.5px; margin-top: -2px; }
+.bar-right { display: flex; align-items: center; gap: 14px; }
+.status {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--muted);
+  cursor: default;
+  white-space: nowrap;
+}
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.status.online .status-dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.status.offline .status-dot { background: var(--bad); }
+.stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--bad);
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--border));
+  font-weight: 600;
+  font-size: 14px;
+}
+.stop svg { width: 14px; height: 14px; }
+.stop:hover:not(:disabled) { background: var(--bad-soft); }
+.stop:disabled { color: var(--faint); border-color: var(--border); cursor: default; }
+.bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 14px;
+}
+.bar-btn svg { width: 16px; height: 16px; color: var(--muted); }
+.bar-btn:hover { border-color: var(--accent); }
+.bar-btn:hover svg { color: var(--accent); }
+a.bar-btn { text-decoration: none; }
+/* Five labeled buttons need about 1000px. Below that they show their icons (each
+   keeps its name as a tooltip), never wrapping or pushing Stop off the bar. */
+.bar-btn, .stop { white-space: nowrap; flex-shrink: 0; }
+/* The bar's buttons stay in one place in the page; on a phone they fold into a menu
+   with their names showing, and Stop stays on the bar. */
+.bar-menu { display: flex; align-items: center; gap: inherit; }
+.more-btn { display: none; }
+
+@media (max-width: 1080px) {
+  body:not(.hood-page) .bar-btn span { display: none; }
+  body:not(.hood-page) .bar-btn { padding: 7px 9px; }
+}
+
+@media (max-width: 760px) {
+  body:not(.hood-page) .more-btn { display: inline-flex; padding: 7px 9px; }
+  body:not(.hood-page) .bar-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 12px;
+    z-index: 40;
+    min-width: 210px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+  }
+  body:not(.hood-page) .bar-menu.open { display: flex; }
+  body:not(.hood-page) .bar-menu .bar-btn {
+    justify-content: flex-start;
+    border-color: transparent;
+    padding: 10px 12px;
+  }
+  body:not(.hood-page) .bar-menu .bar-btn span { display: inline; }
+}
+
+@media (max-width: 640px) {
+  .bar { padding: 10px 16px; }
+  .brand .tagline { display: none; }
+  .status { padding: 4px 10px; }
+  /* The buttons close up and Stop shows only its icon, so none is cut off. */
+  .bar-right { gap: 8px; }
+  .stop span { display: none; }
+  .stop { padding: 7px 10px; }
+}
+
+@media (max-width: 600px) {
+  .bar-btn span { display: none; }
+}
+
+@media (max-width: 480px) {
+  .bar-right { gap: 6px; }
+  #status-text { display: none; }
+  .status { padding: 7px; }
+  .brand { gap: 8px; }
+  /* A phone: Rimuru's mark without its name, square buttons, tighter gaps. */
+  .bar { gap: 8px; padding: 10px 12px; }
+  .brand .name { display: none; }
+  .bar-btn { padding: 7px; }
+}

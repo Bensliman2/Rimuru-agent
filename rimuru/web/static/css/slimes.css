@@ -1,0 +1,134 @@
+/* The slimes: bodies, what each is holding, moods and eyes. */
+@keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.045, .965); } }
+.slime { position: relative; display: inline-block; flex-shrink: 0; }
+.slime .sl-body { width: 100%; height: 100%; transform-origin: 50% 92%; }
+.sl-lg { width: 54px; height: 54px; }
+.sl-md { width: 40px; height: 40px; }
+.sl-sm { width: 32px; height: 32px; }
+.sl-xs { width: 22px; height: 22px; }
+.sl-badge {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  width: 50%;
+  height: 50%;
+  min-width: 13px;
+  min-height: 13px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--accent);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  box-shadow: 0 1px 3px rgba(15, 27, 45, .12);
+}
+.sl-badge svg { width: 64%; height: 64%; }
+.sl-xs .sl-badge { right: -4px; bottom: -3px; }
+.sl-fx { position: absolute; inset: 0; pointer-events: none; }
+.sl-fx i { position: absolute; display: none; border-radius: 50%; background: var(--accent); }
+/* thinking: three dots drift above it */
+.m-thinking:not(.still) .sl-body { animation: breathe 2.6s ease-in-out infinite; }
+.m-thinking:not(.still) .sl-fx i {
+  display: block;
+  top: -16%;
+  width: 13%;
+  height: 13%;
+  opacity: .25;
+  animation: blink 1.4s infinite ease-in-out;
+}
+.m-thinking .sl-fx i:nth-child(1) { left: 22%; }
+.m-thinking .sl-fx i:nth-child(2) { left: 44%; animation-delay: .2s; }
+.m-thinking .sl-fx i:nth-child(3) { left: 66%; animation-delay: .4s; }
+/* reading: a line scans down the page it holds */
+.m-reading:not(.still) .sl-body { animation: breathe 3s ease-in-out infinite; }
+.m-reading:not(.still) .sl-badge::after {
+  content: "";
+  position: absolute;
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: .75;
+  animation: scan 1.6s ease-in-out infinite;
+}
+@keyframes scan { 0%, 100% { top: 24%; } 50% { top: 70%; } }
+/* writing: the pencil works back and forth */
+.m-writing:not(.still) .sl-body { animation: breathe 2s ease-in-out infinite; }
+.m-writing:not(.still) .sl-badge svg { animation: scribble .9s ease-in-out infinite; }
+@keyframes scribble {
+  0%, 100% { transform: rotate(-12deg) translateX(-7%); }
+  50% { transform: rotate(10deg) translateX(7%); }
+}
+/* testing: small bubbles rise from the flask */
+.m-testing:not(.still) .sl-body { animation: breathe 2.2s ease-in-out infinite; }
+.m-testing:not(.still) .sl-fx i {
+  display: block;
+  width: 10%;
+  height: 10%;
+  right: 4%;
+  bottom: 34%;
+  opacity: 0;
+  animation: bubble 1.8s ease-in infinite;
+}
+.m-testing .sl-fx i:nth-child(2) { right: 15%; animation-delay: .6s; }
+.m-testing .sl-fx i:nth-child(3) { right: -4%; animation-delay: 1.2s; }
+@keyframes bubble {
+  0% { transform: translateY(0); opacity: 0; }
+  25% { opacity: .7; }
+  100% { transform: translateY(-150%); opacity: 0; }
+}
+/* running a command: the prompt blinks */
+.m-running:not(.still) .sl-body { animation: breathe 2.4s ease-in-out infinite; }
+.m-running:not(.still) .sl-badge svg { animation: blink 1s steps(2) infinite; }
+/* waiting for a free clone */
+.m-waiting .sl-body { opacity: .45; }
+.m-waiting:not(.still) .sl-body { animation: waiting 3.2s ease-in-out infinite; }
+@keyframes waiting { 0%, 100% { opacity: .3; } 50% { opacity: .6; } }
+/* how it ended */
+.m-done .sl-badge, .m-done-tile .sl-badge {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--border));
+}
+.m-failed .sl-body { filter: saturate(.5); }
+.m-failed .sl-badge {
+  color: var(--bad);
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--border));
+}
+.m-stopped .sl-body, .m-interrupted .sl-body { filter: saturate(.3); opacity: .75; }
+.m-stopped .sl-badge, .m-interrupted .sl-badge { color: var(--muted); }
+.m-todo .sl-body, .m-skipped .sl-body { opacity: .28; filter: grayscale(.4); }
+.m-todo .sl-badge, .m-skipped .sl-badge {
+  color: var(--faint);
+  background: var(--surface-2);
+  border-color: var(--border);
+  box-shadow: none;
+}
+.m-step .sl-badge { color: var(--muted); border-color: var(--border); }
+/* Every slime blinks on its own beat (--blink), glances up while it thinks,
+   looks down at its work, and rests its eyes when it is done. */
+.sl-open {
+  transform-box: fill-box;
+  transform-origin: 50% 55%;
+  opacity: var(--eyes-open, 1);
+  animation: sl-blink 5.5s infinite;
+  animation-delay: var(--blink, 0s);
+}
+.sl-shut { opacity: var(--eyes-shut, 0); }
+.sl-look { transform: translate(var(--look-x, 0px), var(--look-y, 0px)); transition: transform .5s ease; }
+@keyframes sl-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.12); } }
+.m-thinking { --look-x: 1.4px; --look-y: -1.6px; }
+.m-reading, .m-writing, .m-testing, .m-running { --look-y: 1.3px; }
+.m-done { --eyes-open: 0; --eyes-shut: 1; }
+/* Each clone's body takes its persona's color (rimuru/persona.py COLORS), set on
+   the slime as --slime and --slime-edge; a white sheen keeps it soft. */
+.sl-skin { fill: var(--slime, #A6DCF2); stroke: var(--slime-edge, #5DBDE6); stroke-width: 2; }
+
+@media (prefers-reduced-motion: reduce) {
+  .slime *, .slime *::after { animation: none !important; }
+  .sl-open { animation: none; }
+  .sl-look { transition: none; }
+}

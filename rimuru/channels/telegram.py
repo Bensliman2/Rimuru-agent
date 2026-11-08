@@ -22,6 +22,7 @@ from ..safety import scrubbed
 from ..ids import new_id
 from ..models import Trigger
 from .base import ChannelNorms
+from ..logs import noted
 
 log = logging.getLogger("rimuru.telegram")
 
@@ -89,7 +90,7 @@ class TelegramChannel:
             self.task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self.task
-        with contextlib.suppress(Exception):
+        with noted("closing the Telegram connection", logging.DEBUG):
             await self.http.aclose()
 
     async def _poll(self) -> None:
@@ -106,7 +107,7 @@ class TelegramChannel:
                     try:
                         await self.handle(update)
                     except Exception as exc:  # noqa: BLE001 - one bad message must not stop the bot
-                        log.warning("telegram message not handled: %s", type(exc).__name__)
+                        log.warning("telegram message not handled: %s", type(exc).__name__, exc_info=True)
             except asyncio.CancelledError:
                 raise
             except Problem as exc:
@@ -116,6 +117,7 @@ class TelegramChannel:
                 await asyncio.sleep(wait)
                 wait = min(wait * 2, 60.0)
             except Exception as exc:  # noqa: BLE001
+                log.warning("checking Telegram failed", exc_info=True)
                 self.state, self.problem = "problem", f"{type(exc).__name__}"
                 await asyncio.sleep(wait)
                 wait = min(wait * 2, 60.0)

@@ -1,0 +1,15 @@
+/* Everything both pages share. One file per part of the app; the order matters. */
+@import "base.css";
+@import "bar.css";
+@import "layout.css";
+@import "sessions.css";
+@import "chat.css";
+@import "slimes.css";
+@import "clones.css";
+@import "panel.css";
+@import "settings.css";
+@import "folders.css";
+@import "connections.css";
+@import "skills.css";
+@import "memory.css";
+@import "first_start.css";

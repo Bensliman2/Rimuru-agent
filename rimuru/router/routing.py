@@ -19,11 +19,11 @@ paying for them in its context window.
 """
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from ..context import inline_trigger
 from ..ids import ROUTER_SESSION_ID
-from ..models import R_PASSTHROUGH, R_ROUTER, V_ACCEPTED, V_CANDIDATE, V_DROPPED_FAST, Trigger
+from ..models import R_PASSTHROUGH, R_ROUTER, V_ACCEPTED, V_DROPPED_FAST, Trigger
 from ..safety import hidden_instructions
 from ..sessions import UNNAMED
 

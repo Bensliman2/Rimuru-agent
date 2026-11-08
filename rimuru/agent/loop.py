@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -27,6 +28,7 @@ from ..config import Config
 from ..context import trim_messages
 from ..ids import new_id
 from ..llm.base import LLMClient, Msg, ProviderAccountError
+from ..logs import noted
 from ..models import Session, Step, Usage, now
 from ..safety import scrubbed
 from .tools import ToolRegistry
@@ -172,7 +174,7 @@ class AgentLoop:
         self._stop.set()
         self.store.touch_session(self.session, status=status, current_activity="")
         # Wake the loop so it notices the stop flag.
-        with contextlib.suppress(Exception):
+        with noted("waking the loop to stop", logging.DEBUG):
             self.inbox.put_nowait(Injection(text="", kind="system"))
 
     async def join(self, timeout: float = 10.0) -> None:

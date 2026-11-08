@@ -1,5 +1,5 @@
-# Every push: all the tests - the sandbox ones too, which need Docker - plus a
-# check that the pages' scripts parse and that the Docker setup builds.
+# Every push: all the tests - the sandbox ones too, which need Docker, and the
+# pages in a real browser - and a check that the Docker setup builds.
 name: tests
 
 on:
@@ -19,15 +19,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install
-        run: pip install -r requirements.txt pytest
+        run: pip install -r requirements.txt pytest playwright
       - name: Build the clones' sandbox, so its tests run
         run: docker build -t "$(python -c 'from rimuru.worker.shell import SANDBOX_IMAGE as i; print(i)')" sandbox
       - name: Run the tests
         run: python -m pytest -q
-      - name: The pages' scripts parse
-        run: |
-          node --check rimuru/web/static/app.js
-          node --check rimuru/web/static/inside.js
+        env:
+          RIMURU_BROWSER_TESTS: required    # the runner has Chrome: no browser would be a failure
 
   docker:
     name: Docker image and compose file
@@ -37,5 +35,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: The compose file is valid
         run: docker compose config --quiet
-      - name: The app's image builds
-        run: docker build -t rimuru:ci .
+      - name: The stack builds and starts
+        run: docker compose up -d --build --wait --wait-timeout 240
+      - name: Clones run commands in the sandbox, and the files are the person's
+        run: docker compose exec -T -u "$(id -u):$(id -g)" -e HOME=/tmp rimuru python scenarios/docker_smoke.py
+      - name: The app answers, and runs as the person, not as root
+        run: |
+          curl -fsS http://127.0.0.1:8800/api/overview > /dev/null
+          test "$(docker compose exec -T rimuru awk '/^Uid:/ {print $2}' /proc/1/status)" = "$(id -u)"
+          test "$(stat -c %u rimuru-data/rimuru.db)" = "$(id -u)"
+      - name: What happened, if something failed
+        if: failure()
+        run: docker compose logs --tail 80

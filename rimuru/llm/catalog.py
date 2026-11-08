@@ -18,9 +18,9 @@ models file can be shared or committed without leaking anything.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -31,6 +31,7 @@ from typing import Any
 
 import httpx
 
+from ..logs import noted
 from ..safety import scrubbed
 from .base import Msg, ProviderAccountError, ToolSpec
 
@@ -492,9 +493,17 @@ _HELLO = ToolSpec(name="reply", description="Send a reply to the person.",
                   schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]})
 
 
-async def try_model(entry: ModelEntry, *, seconds: float = 60.0) -> dict[str, Any]:
+def _what_it_said(exc: Exception) -> str:
+    """What the provider said, without the address and the JSON around it."""
+    text = scrubbed(str(exc))
+    said = re.search(r'"message"\s*:\s*"([^"]{3,200})"', text)
+    return said.group(1) if said else text[:240] or type(exc).__name__
+
+
+async def try_model(entry: ModelEntry, *, seconds: float = 60.0, pause: float = 2.0) -> dict[str, Any]:
     """One small request, the way Rimuru makes them: does this model answer, and
-    can it call a tool? Everything Rimuru and its clones do goes through tools."""
+    can it call a tool? Everything Rimuru and its clones do goes through tools.
+    Free models stumble now and then, so a stumble gets one more try."""
     result: dict[str, Any] = {"ok": False, "model": entry.model, "label": entry.label, "seconds": 0, "problem": ""}
     started = time.perf_counter()
     client = None
@@ -502,10 +511,20 @@ async def try_model(entry: ModelEntry, *, seconds: float = 60.0) -> dict[str, An
         client = await asyncio.to_thread(make_client, entry, concurrency=1)
         if hasattr(client, "max_attempts"):
             client.max_attempts = 2
-        answer = await asyncio.wait_for(client.complete(
-            system="You answer by calling the reply tool.",
-            messages=[Msg("user", "Say hello to the person, in one short sentence.")],
-            tools=[_HELLO], max_tokens=200, role="router"), seconds)
+        for attempt in (1, 2):
+            try:
+                answer = await asyncio.wait_for(client.complete(
+                    system="You answer by calling the reply tool.",
+                    messages=[Msg("user", "Say hello to the person, in one short sentence.")],
+                    tools=[_HELLO], max_tokens=200, role="router"), seconds)
+                break
+            except (asyncio.TimeoutError, ProviderAccountError):
+                raise
+            except Exception:  # noqa: BLE001 - told below, if it happens twice
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(pause)
+                started = time.perf_counter()
         result["seconds"] = round(time.perf_counter() - started, 1)
         if answer.tool_calls:
             result["ok"] = True
@@ -517,11 +536,11 @@ async def try_model(entry: ModelEntry, *, seconds: float = 60.0) -> dict[str, An
     except ProviderAccountError as exc:
         result["problem"] = exc.plain() + "."
     except Exception as exc:  # noqa: BLE001 - whatever it is, it is told as it came
-        result["problem"] = scrubbed(str(exc))[:240] or type(exc).__name__
+        result["problem"] = _what_it_said(exc)
     finally:
         closing = getattr(client, "aclose", None)
         if closing is not None:
-            with contextlib.suppress(Exception):
+            with noted("closing a model's connection", logging.DEBUG):
                 await closing()
     return result
 

@@ -12,7 +12,8 @@ import time
 from typing import Any
 
 from ..models import Usage
-from .base import LLMClient, LLMResponse, Msg, ProviderAccountError, ToolCall, ToolSpec, account_problem
+from .base import (METER, LLMClient, LLMResponse, Msg, ProviderAccountError, ToolCall, ToolSpec,
+                   account_problem, check_budget)
 
 
 class AnthropicClient(LLMClient):
@@ -31,6 +32,7 @@ class AnthropicClient(LLMClient):
         # From the model's entry in config/models.toml, when set there.
         self.max_tokens_override: int | None = None
         self.provider_label = ""
+        self._service = (base_url or "https://api.anthropic.com").rstrip("/")
         # Rimuru's own calls stream, so a person cutting in stops the answer being
         # written (see OpenAICompatClient.stream); last_progress: how far it got.
         self.stream = False
@@ -86,6 +88,8 @@ class AnthropicClient(LLMClient):
 
         last_error: Exception | None = None
         for attempt in range(3):
+            check_budget(self.provider_label or "Claude (Anthropic)")
+            METER.note(self._service)
             try:
                 raw = await (self._streamed(payload) if self.stream
                              else self._client.messages.create(**payload))
@@ -98,6 +102,12 @@ class AnthropicClient(LLMClient):
                 last_error = exc
                 if attempt == 2:
                     raise
+                hook = getattr(self, "on_retry", None)
+                if hook is not None:
+                    try:
+                        hook(type(exc).__name__)
+                    except Exception:  # noqa: BLE001 - only a courtesy
+                        pass
                 await asyncio.sleep(1.5 * (attempt + 1))
         else:  # pragma: no cover
             raise last_error or RuntimeError("anthropic call failed")

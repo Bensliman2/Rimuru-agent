@@ -471,6 +471,26 @@ class WorkerPool:
         self._launch_next()
 
     # ------------------------------------------------------------------ #
+    async def enforce_time_limit(self) -> int:
+        """Stop jobs that ran past RIMURU_JOB_MINUTES, and tell Rimuru why."""
+        minutes = int(getattr(self.config, "job_minutes", 0) or 0)
+        if not minutes:
+            return 0
+        stopped = 0
+        for worker in list(self.live):
+            task = worker.task
+            if (task.status != "running" or not task.started_ts
+                    or time.time() - task.started_ts < minutes * 60):
+                continue
+            await self.stop(task, reason=f"took longer than {minutes} minutes, the limit")
+            stopped += 1
+            if self.router is not None:
+                self.router.inject(
+                    f'Task [{task.id}] "{task.title}" was stopped: it took longer than {minutes} '
+                    f"minutes, the limit. Tell the person plainly, and offer a smaller version.",
+                    waiting=task.thread_id)
+        return stopped
+
     async def stop(self, task: Task, *, reason: str = "cancelled") -> None:
         worker = self.workers.get(task.worker_id or "")
         self.store.update_task(

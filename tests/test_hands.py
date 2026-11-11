@@ -9,13 +9,11 @@ import json
 import secrets
 import socket
 import time
-from pathlib import Path
 
 import pytest
 
 from rimuru.config import Config
 from rimuru.hands import daemon, remote
-from rimuru.hands.hub import RemoteError
 from rimuru.hands.remote import RemoteFiles, RemoteShell
 from rimuru.ids import new_id
 from rimuru.llm.base import LLMResponse, ToolCall

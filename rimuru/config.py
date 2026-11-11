@@ -87,6 +87,10 @@ class Config:
     sessions_dir: Path = field(
         default_factory=lambda: Path(os.environ.get("RIMURU_SESSIONS", "./data/sessions")).resolve()
     )
+    # Caps: how long one job may take, and how many AI requests an hour the app
+    # may make in all (0: no limit). The person sets them; the app says when one stops work.
+    job_minutes: int = field(default_factory=lambda: _int("RIMURU_JOB_MINUTES", 45))
+    max_requests_per_hour: int = field(default_factory=lambda: _int("RIMURU_MAX_REQUESTS_PER_HOUR", 0))
     # A new job within this long of the last one finishing in the same session
     # goes to that same clone, which remembers the work (worker/pool.py).
     warm_clone_seconds: float = field(default_factory=lambda: float(os.environ.get("RIMURU_WARM_CLONE_SECONDS", "600")))

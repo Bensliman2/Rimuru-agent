@@ -105,6 +105,11 @@ class WatchdogAgent:
         )
         # Its checks are fresh each time: nothing to resume after a restart.
         self.loop.persist = False
+        # One verdict ends a tick - found in real use: the model called assess 87
+        # times in a row, 0.7 s apart - and a tick never takes more than three
+        # rounds of tools.
+        self.loop.ends_turn = lambda outputs: all(name in {"assess", "answer"} for name, _ in outputs)
+        self.loop.max_rounds = 3
         self._timer: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ #
@@ -148,7 +153,10 @@ class WatchdogAgent:
                 # there is something to judge, plus a sanity sweep every 4th tick.
                 # An idle system costs nothing: the periodic sweep only runs
                 # while clones are actually working.
-                if report["findings"] or (self.ticks % 4 == 0 and self.pool.live):
+                # Rimuru's own AI errors are not for the model to judge: it cannot
+                # fix a busy service, and asking it then only adds to the load.
+                worth = [f for f in report["findings"] if f != "router_api_errors"]
+                if worth or (self.ticks % 4 == 0 and self.pool.live):
                     self.loop.inject(report["text"], kind="system")
                 await asyncio.sleep(self.interval)
             except asyncio.CancelledError:

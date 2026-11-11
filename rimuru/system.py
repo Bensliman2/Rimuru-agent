@@ -30,7 +30,7 @@ from .channels.sim import GitHubSimChannel, ImSimChannel, SimRunner
 from .config import CONFIG, Config
 from .ids import new_id
 from .llm import build_client, catalog
-from .llm.base import METER, Msg
+from .llm.base import BUDGET, METER, Msg
 from .models import TERMINAL, Task, Trigger
 from .recall import describe_graph
 from .connections import Connections
@@ -53,6 +53,7 @@ class RimuruSystem:
     def __init__(self, config: Config | None = None, *, speed: float = 4.0) -> None:
         self.config = config or CONFIG
         self.config.ensure_dirs()
+        BUDGET.per_hour = max(0, int(getattr(self.config, "max_requests_per_hour", 0) or 0))
         # Which model does which job: the person's choice in config/models.toml.
         # Anything missing or unreachable means demo mode, and the app says why.
         self.config.setup = catalog.load(self.config.models_path)
@@ -176,6 +177,8 @@ class RimuruSystem:
             return
         for role in catalog.ROLES:
             entry = setup.entry_for(role)
+            if entry is None:                 # an optional job nobody was given
+                continue
             try:
                 catalog.base_url_for(entry)
             except Exception as exc:  # noqa: BLE001 - shown to the person as is
@@ -247,7 +250,10 @@ class RimuruSystem:
         if key is None or (provider, key) in self._told:
             return
         self._told.add((provider, key))
-        if event.get("reason") == "credit":
+        if event.get("reason") == "budget":
+            text = (f"I've made all the AI requests you allowed for this hour ({event.get('detail') or ''}). "
+                    f"I'll carry on by myself when the hour rolls over.")
+        elif event.get("reason") == "credit":
             where = self.TOP_UP.get(provider)
             text = (f"I can't think right now: {provider} says your account is out of credit. "
                     f"Top it up{f' at {where}' if where else ''}, and I will carry on by myself - "
@@ -607,8 +613,12 @@ class RimuruSystem:
         if self.config.is_demo() or self.config.setup is None:
             return []
         out, seen = [], set()
+        if BUDGET.per_hour:
+            out.append({"provider": "Your hourly limit", "limit": BUDGET.per_hour, "used": METER.total()})
         for role in ("router", "worker", "watchdog", "filter"):
             entry = self.config.setup.entry_for(role)
+            if entry is None:
+                continue
             provider = catalog.PROVIDERS.get(entry.provider)
             if provider is None or not provider.hourly or provider.id in seen:
                 continue
@@ -640,6 +650,7 @@ class RimuruSystem:
             with noted("the minute's housekeeping"):
                 self.warn_about_quota()
                 self.pool.sweep_warm()
+                await self.pool.enforce_time_limit()
 
     KEEP_DETAILS_DAYS = 30
 

@@ -8,7 +8,7 @@ import { refresh } from "./main.js";
 const S = { data: null, models: [], roles: {}, keys: {}, editing: null, found: {}, dirty: false };
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/;
 const ROLE_ICON = () => ({ router: mark("rimuru"), worker: mark("clone"),
-                           watchdog: icon("eye"), filter: icon("funnel") });
+                           watchdog: icon("eye"), filter: icon("funnel"), fallback: icon("layers") });
 
 const provider = (id) => (S.data && S.data.providers.find((p) => p.id === id)) ||
   { id, label: id, needs_key: false, key_env: "", base_url: "", hint: "" };
@@ -73,6 +73,7 @@ function renderSettings() {
   const options = (role) => {
     const opts = role === "watchdog" || role === "filter"
       ? ['<option value="">Same as Rimuru</option>']
+      : role === "fallback" ? ['<option value="">No backup</option>']
       : S.roles[role] ? [] : ['<option value="">Choose a model&hellip;</option>'];
     S.models.forEach((m) => opts.push(`<option value="${esc(m.name)}"${S.roles[role] === m.name
       ? " selected" : ""}>${esc(m.name)}</option>`));
@@ -81,7 +82,8 @@ function renderSettings() {
   const now = (role) => {
     const name = S.roles[role] || (role === "watchdog" || role === "filter" ? S.roles.router : "");
     const m = S.models.find((x) => x.name === name);
-    return m ? `${esc(m.model)} &middot; ${esc(provider(m.provider).label)}` : "Nothing chosen yet";
+    return m ? `${esc(m.model)} &middot; ${esc(provider(m.provider).label)}`
+      : role === "fallback" ? "No backup" : "Nothing chosen yet";
   };
   parts.push(`<div class="section"><h3>Who does what</h3><div class="roles">${d.role_info.map((r) => `
     <div class="role-row">

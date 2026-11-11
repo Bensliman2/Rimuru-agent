@@ -35,7 +35,7 @@ from ..logs import noted
 from ..safety import scrubbed
 from .base import Msg, ProviderAccountError, ToolSpec
 
-ROLES = ("router", "worker", "watchdog", "filter")
+ROLES = ("router", "worker", "watchdog", "filter", "fallback")
 REQUIRED = ("router", "worker")
 
 ROLE_INFO = {
@@ -46,6 +46,8 @@ ROLE_INFO = {
                              "A fast, cheap model is fine."),
     "filter": ("Noise filter", "Decides whether a group-chat message needs Rimuru. "
                                "A fast, cheap model is fine."),
+    "fallback": ("Backup model", "Takes over for a few minutes when Rimuru's or the clones' model "
+                                 "fails - out of credit, down, too busy. Optional."),
 }
 
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,47}")

@@ -22,7 +22,14 @@ def build_client(config: Config, kind: str, *, speed: float = 1.0) -> LLMClient:
         return MockClient(speed=speed)
     from .catalog import make_client
 
-    client = make_client(config.setup.entry_for(kind), concurrency=config.llm_concurrency)
+    entry = config.setup.entry_for(kind)
+    client = make_client(entry, concurrency=config.llm_concurrency)
+    chosen = getattr(config.setup, "roles", None) or {}
+    backup = config.setup.entry_for("fallback") if kind in {"router", "worker"} and chosen.get("fallback") else None
+    if backup is not None and backup.name != entry.name and not backup.problems():
+        from .fallback import FallbackClient
+
+        client = FallbackClient(client, make_client(backup, concurrency=config.llm_concurrency))
     # Only Rimuru itself is cut in on (a person's message stops a turn about
     # something else), so only its calls stream: closing the stream stops the
     # provider writing an answer that will be thrown away.

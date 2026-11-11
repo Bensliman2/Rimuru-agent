@@ -10,7 +10,6 @@ from pathlib import Path
 from rimuru import persona
 from rimuru.config import Config
 from rimuru.ids import new_id
-from rimuru.llm.base import Msg
 from rimuru.models import Memory, Task
 from rimuru.system import RimuruSystem
 

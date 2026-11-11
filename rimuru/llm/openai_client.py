@@ -12,6 +12,7 @@ Built for a real, rate-limited account rather than a demo:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import random
@@ -21,19 +22,21 @@ from typing import Any
 import httpx
 
 from ..models import Usage
-from .base import METER, LLMClient, LLMResponse, Msg, ProviderAccountError, ToolCall, ToolSpec, account_problem
+from .base import (METER, PRIORITY, LLMClient, LLMResponse, Msg, PriorityGate, ProviderAccountError, ToolCall,
+                   ToolSpec, account_problem, check_budget)
 
-_GATES: dict[tuple[int, int], asyncio.Semaphore] = {}
+_GATES: dict[tuple[int, str, int], PriorityGate] = {}
 log = logging.getLogger("rimuru.llm")
 
 
-def _gate(limit: int, server: str = "") -> asyncio.Semaphore:
-    """One semaphore per event loop and server, shared by every client on it:
-    rate limits are per account, and each job may use a different provider."""
+def _gate(limit: int, server: str = "") -> PriorityGate:
+    """One gate per event loop and server, shared by every client on it: rate
+    limits are per account, and each job may use a different provider. The
+    person's chat goes first (base.PRIORITY)."""
     key = (id(asyncio.get_running_loop()), server, limit)
     gate = _GATES.get(key)
     if gate is None:
-        gate = _GATES[key] = asyncio.Semaphore(max(1, limit))
+        gate = _GATES[key] = PriorityGate(limit)
     return gate
 
 
@@ -147,7 +150,13 @@ class OpenAICompatClient(LLMClient):
                     out.append({"role": "user", "content": "\n".join(leftovers)})
         return out
 
-    async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _retrying(self, why: str) -> None:
+        hook = getattr(self, "on_retry", None)
+        if hook is not None:
+            with contextlib.suppress(Exception):
+                hook(why)
+
+    async def _post(self, payload: dict[str, Any], priority: int = 1) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -155,8 +164,9 @@ class OpenAICompatClient(LLMClient):
         last_error = "no attempt made"
         for attempt in range(self.max_attempts):
             backoff = min(20.0, 1.5 * (2 ** attempt)) + random.uniform(0, 0.5)
+            check_budget(self.provider_label or httpx.URL(self.base_url).host)
             try:
-                async with _gate(self.concurrency, self.base_url):
+                async with _gate(self.concurrency, self.base_url).slot(priority):
                     METER.note(self.base_url)
                     response = await self._http().post(
                         f"{self.base_url}/chat/completions", json=payload, headers=headers
@@ -167,6 +177,7 @@ class OpenAICompatClient(LLMClient):
                 # whole reply, so a timeout loop must show up in the logs.
                 log.warning("%s: %s, retrying (attempt %d/%d)", self.model,
                             type(exc).__name__, attempt + 2, self.max_attempts)
+                self._retrying(type(exc).__name__)
                 await asyncio.sleep(backoff)
                 continue
 
@@ -181,6 +192,7 @@ class OpenAICompatClient(LLMClient):
                 last_error = f"HTTP {response.status_code}: {response.text[:200]}"
                 log.warning("%s: HTTP %d, retrying (attempt %d/%d)", self.model,
                             response.status_code, attempt + 2, self.max_attempts)
+                self._retrying(f"HTTP {response.status_code}")
                 try:
                     retry_after = float(response.headers.get("retry-after", "") or 0)
                 except ValueError:
@@ -198,7 +210,7 @@ class OpenAICompatClient(LLMClient):
 
         raise ProviderError(f"gave up after {self.max_attempts} attempts: {last_error}")
 
-    async def _post_stream(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post_stream(self, payload: dict[str, Any], priority: int = 1) -> dict[str, Any]:
         """The same request, streamed, read back into the shape _post returns.
 
         Errors before the first byte are handled exactly as in _post. A provider
@@ -215,8 +227,9 @@ class OpenAICompatClient(LLMClient):
         for attempt in range(self.max_attempts):
             backoff = min(20.0, 1.5 * (2 ** attempt)) + random.uniform(0, 0.5)
             status, text, retry_after = 0, "", ""
+            check_budget(self.provider_label or httpx.URL(self.base_url).host)
             try:
-                async with _gate(self.concurrency, self.base_url):
+                async with _gate(self.concurrency, self.base_url).slot(priority):
                     METER.note(self.base_url)
                     async with self._http().stream("POST", f"{self.base_url}/chat/completions",
                                                    json=body, headers=headers) as response:
@@ -229,6 +242,7 @@ class OpenAICompatClient(LLMClient):
                 last_error = f"{type(exc).__name__}: {exc}"
                 log.warning("%s: %s while streaming, retrying (attempt %d/%d)", self.model,
                             type(exc).__name__, attempt + 2, self.max_attempts)
+                self._retrying(type(exc).__name__)
                 await asyncio.sleep(backoff)
                 continue
 
@@ -240,6 +254,7 @@ class OpenAICompatClient(LLMClient):
                 last_error = f"HTTP {status}: {text[:200]}"
                 log.warning("%s: HTTP %d, retrying (attempt %d/%d)", self.model, status,
                             attempt + 2, self.max_attempts)
+                self._retrying(f"HTTP {status}")
                 try:
                     wait = float(retry_after or 0)
                 except ValueError:
@@ -252,7 +267,7 @@ class OpenAICompatClient(LLMClient):
                     body.pop("stream_options")
                     continue
                 self.stream = False                   # this provider does not stream at all
-                return await self._post(payload)
+                return await self._post(payload, priority)
             raise ProviderError(f"HTTP {status} from {self.base_url} for model "
                                 f"{self.model}: {text[:500]}")
         raise ProviderError(f"gave up after {self.max_attempts} attempts: {last_error}")
@@ -325,7 +340,8 @@ class OpenAICompatClient(LLMClient):
             payload["tools"] = self._tools(tools)
             payload["tool_choice"] = "auto"
 
-        data = await (self._post_stream(payload) if self.stream else self._post(payload))
+        priority = PRIORITY.get(role, 1)
+        data = await (self._post_stream(payload, priority) if self.stream else self._post(payload, priority))
 
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message") or {}

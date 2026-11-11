@@ -686,6 +686,23 @@ class Store:
                                      (session_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def save_inbox(self, session_id: str, items: list[dict[str, Any]]) -> None:
+        """What waits for an agent, not yet taken in (agent/loop.py)."""
+        self._write("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                    (f"inbox:{session_id}", json.dumps(items, default=str)))
+
+    def load_inbox(self, session_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            if self._closed:
+                return []
+            row = self._conn.execute("SELECT value FROM meta WHERE key = ?",
+                                     (f"inbox:{session_id}",)).fetchone()
+        try:
+            items = json.loads(row[0]) if row else []
+        except ValueError:
+            return []
+        return [i for i in items if isinstance(i, dict) and i.get("uid") and i.get("text")]
+
     def save_notes(self, session_id: str, notes: list[str]) -> None:
         self._write("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
                     (f"notes:{session_id}", json.dumps(notes)))

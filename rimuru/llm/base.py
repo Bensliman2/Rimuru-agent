@@ -7,6 +7,10 @@ architecture.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import heapq
+import itertools
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -82,6 +86,9 @@ class RequestMeter:
     def note(self, service: str) -> None:
         self._calls.setdefault(service.rstrip("/"), deque()).append(time.time())
 
+    def total(self, within: float = 3600.0) -> int:
+        return sum(self.used(service, within) for service in list(self._calls))
+
     def used(self, service: str, within: float = 3600.0) -> int:
         calls = self._calls.get(service.rstrip("/"))
         if not calls:
@@ -92,6 +99,68 @@ class RequestMeter:
 
 
 METER = RequestMeter()
+
+
+class Budget:
+    """The person's own cap on AI requests an hour, across every service
+    (RIMURU_MAX_REQUESTS_PER_HOUR); 0 means none."""
+
+    def __init__(self) -> None:
+        self.per_hour = 0
+
+
+BUDGET = Budget()
+
+
+def check_budget(provider: str) -> None:
+    """Before each request: refuse once the hour's budget is used. The loop then
+    waits and tries again by itself, and the person is told (provider.blocked)."""
+    if BUDGET.per_hour and METER.total() >= BUDGET.per_hour:
+        raise ProviderAccountError("budget", provider or "The AI service",
+                                   f"{BUDGET.per_hour} requests an hour")
+
+
+# Who goes first when the requests to one service queue up: the person's chat,
+# then the clones doing their work, then the agents in the background.
+PRIORITY = {"router": 0, "worker": 1, "watchdog": 2, "filter": 2}
+
+
+class PriorityGate:
+    """A semaphore that lets the most urgent waiter in first."""
+
+    def __init__(self, limit: int) -> None:
+        self._free = max(1, limit)
+        self._queue: list[tuple[int, int, asyncio.Future]] = []
+        self._seq = itertools.count()
+
+    async def acquire(self, priority: int) -> None:
+        if self._free > 0 and not any(not f.done() for _p, _n, f in self._queue):
+            self._free -= 1
+            return
+        future = asyncio.get_running_loop().create_future()
+        heapq.heappush(self._queue, (priority, next(self._seq), future))
+        try:
+            await future
+        except asyncio.CancelledError:
+            if future.done() and not future.cancelled():
+                self.release()                  # a slot was handed over just as it was cancelled
+            raise
+
+    def release(self) -> None:
+        while self._queue:
+            _priority, _n, future = heapq.heappop(self._queue)
+            if not future.done():
+                future.set_result(None)
+                return
+        self._free += 1
+
+    @contextlib.asynccontextmanager
+    async def slot(self, priority: int):
+        await self.acquire(priority)
+        try:
+            yield
+        finally:
+            self.release()
 
 
 class ProviderAccountError(RuntimeError):
@@ -108,6 +177,8 @@ class ProviderAccountError(RuntimeError):
     def plain(self) -> str:
         if self.reason == "credit":
             return f"{self.provider} says the account is out of credit"
+        if self.reason == "budget":
+            return f"the limit you set ({self.detail}) is used up for this hour"
         return f"{self.provider} did not accept the API key"
 
 

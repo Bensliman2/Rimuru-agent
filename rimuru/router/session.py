@@ -16,6 +16,8 @@ what makes batching pay off.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import re
 import time
 from typing import Any
@@ -208,6 +210,13 @@ class RouterAgent:
         self.loop.annotate = self._memories_for
         self._shown: set[str] = set()
         self._shown_spill = 0
+        # A turn that did its job ends there, with at most eight rounds of tools;
+        # an AI service that fails is said in the chat, never left as silence.
+        self.loop.ends_turn = self._ends_turn
+        self.loop.max_rounds = 8
+        self.loop.on_call_failed = self._call_failed
+        self.loop.on_struggling = self._service_struggling
+        self._told_ts = 0.0
 
     # ------------------------------------------------------------------ #
     def start(self) -> None:
@@ -217,6 +226,57 @@ class RouterAgent:
     def inject(self, text: str, trigger_id: str | None = None, **meta: Any) -> None:
         # meta "waiting": the chat thread a person is waiting on for this news.
         self.loop.inject(text, kind="event", trigger_id=trigger_id, **meta)
+
+    # ------------------------------------------------------------------ #
+    # a turn that did its job, and a service that fails
+    # ------------------------------------------------------------------ #
+    # What each tool says when it did what was asked. When every call in a step
+    # is one of these, the turn is over: no call just to read "sent".
+    DONE = {
+        "reply": ("Sent on ",), "ignore": ("Noted, no action",), "dispatch_task": ("Dispatched ",),
+        "message_worker": ("Delivered to ",), "send_files": ("Sent on Telegram",),
+        "remember": ("Remembered [", "Already remembered ["), "forget": ("Forgot [",),
+        "stop_task": ("Stopped ",),
+    }
+
+    def _ends_turn(self, outputs: list[tuple[str, str]]) -> bool:
+        for name, output in outputs:
+            if not output.startswith(self.DONE.get(name, ("\0",))):
+                return False
+            if name == "reply" and "include_code" in output:
+                return False                 # it may send the code after all
+        # Whoever wrote in this turn has had an answer - or nobody is waiting.
+        return (self._replied_ts >= self.loop.turn_opened_ts
+                or not self._waiting_threads(self.loop.turn_events))
+
+    def _service_struggling(self, why: str) -> None:
+        """The client is retrying. Retries in the first seconds are routine; past
+        that, whoever is waiting hears why, instead of silence."""
+        if time.time() - self.loop.turn_started_ts < 8:
+            return
+        with contextlib.suppress(RuntimeError):
+            asyncio.get_running_loop().create_task(self._tell_waiting(again=True, why=_why(why)))
+
+    async def _call_failed(self, exc: Exception, again: bool) -> None:
+        await self._tell_waiting(again=again, why=_why(exc))
+
+    async def _tell_waiting(self, *, again: bool, why: str) -> None:
+        opened = self.loop.turn_opened_ts
+        if self._replied_ts >= opened or (again and self._told_ts >= opened):
+            return
+        waiting = self._waiting_threads(self.loop.turn_events)
+        if not waiting:
+            return
+        self._told_ts = time.time()
+        text = (f"The AI service isn't answering right now ({why}). Your message is safe - "
+                f"I'll answer as soon as it's back." if again else
+                f"I couldn't answer that: the AI service refused it ({why}). Try saying it "
+                f"another way, or check the model with the Models button.")
+        for thread_id in waiting:
+            thread = self.store.threads.get(thread_id)
+            if thread is not None:
+                await self.channels.send(thread.channel, thread.key, text)
+        self.bus.emit("router.told_failure", again=again, why=why)
 
     # ------------------------------------------------------------------ #
     # an answer that was written but never sent
@@ -668,3 +728,16 @@ class RouterAgent:
         if thread is None:
             return "No such thread."
         return inline_thread(thread, self.store, cap=self.config.inline_content_cap, recent=10)
+
+
+def _why(failure: object) -> str:
+    """A failed call, in words a person understands."""
+    text = str(failure)
+    if "429" in text:
+        return "too many requests"
+    if re.search(r"HTTP 5\d\d", text):
+        return "the service has a problem"
+    if any(word in text for word in ("Timeout", "Connect", "Transport", "Network", "Read")):
+        return "it can't be reached"
+    found = re.search(r"HTTP (\d{3})", text)
+    return f"error {found.group(1)}" if found else "an error"

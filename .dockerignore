@@ -13,7 +13,6 @@ token.txt
 
 # Not needed to run it
 .git/
-.claude/
 .venv/
 venv/
 __pycache__/

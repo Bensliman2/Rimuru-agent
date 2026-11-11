@@ -84,7 +84,7 @@ Effort is in days of working sessions. These are estimates, not promises.
 
 ### Phase 0: never lose a message, never run away (2 to 3 days)
 
-Status: done on 2026-11-11 (`c959431`). Fault tests: `tests/test_reliability.py`. Measured in the
+Status: done on 2026-11-11 (`311ac12`). Fault tests: `tests/test_reliability.py`. Measured in the
 golden run below (real free model): 1.0 Rimuru call per message, 3 watchdog calls in ~7 minutes,
 no failed call.
 
@@ -171,8 +171,8 @@ tracked). Making it public, tagging `v0.1.0` and posting are the owner's. The na
 the owner's call. While recording, a real bug turned up and was fixed: Rimuru answered French
 and Arabic messages in English.
 
-1. Make the repository public, publish the release, post the launch. Drafts by Claude,
-   posted by the owner.
+1. Make the repository public, publish the release, post the launch. The drafts are
+   ready; the owner posts them.
 2. Answer every issue within a day for two weeks.
 3. Count image downloads, stars, issues and, only if people opt in, whether a first job finished.
 

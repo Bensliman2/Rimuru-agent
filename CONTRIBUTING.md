@@ -36,8 +36,9 @@ python run.py golden --url http://127.0.0.1:8800   # ten real jobs, graded (need
 
 ## How the code is laid out
 
-[CLAUDE.md](CLAUDE.md) is the map: what each file does, how a message travels, the
-naming traps, and why the code is the way it is. Read it before a larger change.
+The README's **Layout** section says what each folder holds, and **Under the hood**
+maps each module to the section of the article it implements. Read both before a larger
+change.
 
 A few rules the code depends on:
 

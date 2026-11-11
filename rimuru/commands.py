@@ -7,8 +7,8 @@ service is refusing.
 
 /init: one clone studies the session's folder and writes RIMURU.md, a short
 guide to the project. From then on every clone working in that folder reads
-the guide first (worker/pool.py project_guide), the way Claude Code reads
-CLAUDE.md - so each fresh clone knows how the project is run, tested and
+the guide first (worker/pool.py project_guide), the way coding assistants
+read their guide files - so each fresh clone knows how the project is run, tested and
 organized without rediscovering it.
 """
 from __future__ import annotations

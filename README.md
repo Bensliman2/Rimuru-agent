@@ -175,8 +175,8 @@ with any model (free ones included) and a sealed sandbox, that is what Rimuru is
 - **/init: a guide to your project.** In a session that works in your own project,
   type `/init` (typing `/` shows the commands). A clone studies the folder and writes
   `RIMURU.md` - what the project is, how it is organized, how to run and test it, its
-  conventions. From then on every clone that works there reads it first, the way
-  Claude Code reads `CLAUDE.md`; a folder with an `AGENTS.md` or `CLAUDE.md` of its own
+  conventions. From then on every clone that works there reads it first, the way coding
+  assistants read their guide files; a folder with an `AGENTS.md` or `CLAUDE.md` of its own
   works too. Run `/init` again to bring the guide up to date. It works from Telegram too.
 - **Skills: your how-tos, for every clone.** The **Skills** button keeps how-tos you
   write once - your code style, how you test, how you deploy. Each is its own file in
@@ -388,7 +388,7 @@ python run.py golden --url http://127.0.0.1:8800   # ten everyday jobs, run for 
 python run.py --version
 ```
 
-How the code fits together, and why it is the way it is: [CLAUDE.md](CLAUDE.md). How to
+How the code fits together: **Layout** and **Under the hood** below. How to
 help: [CONTRIBUTING.md](CONTRIBUTING.md). What protects you, and how to report a security
 problem: [SECURITY.md](SECURITY.md). What changed: [CHANGELOG.md](CHANGELOG.md).
 

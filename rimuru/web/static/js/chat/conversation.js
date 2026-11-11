@@ -1,6 +1,6 @@
 /* Rimuru's chat page: chat. */
-import { $, esc, tintOf } from "../shared.js";
-import { clock, fmt, mark, state } from "./base.js";
+import { $, esc, icon, tintOf } from "../shared.js";
+import { clock, fmt, mark, state, viewUrl } from "./base.js";
 import { openPanel } from "./details.js";
 
 export const messagesEl = $("messages");
@@ -24,7 +24,9 @@ export function renderChat(data) {
       const tint = tintOf(m).slice(1);
       parts.push(`<div class="msg rimuru from-clone"><svg class="avatar"${tint ? ` style="${tint}"` : ""}><use href="#mark-clone"/></svg><div>
         <div class="msg-from">${esc(m.clone)}</div>
-        <div class="bubble">${fmt(m.text)}</div><div class="time">${clock(m.ts)}</div></div></div>`);
+        <div class="bubble">${fmt(m.text)}</div>${viewUrl(state.chat, m.view)
+          ? `<a class="view-link" href="${esc(viewUrl(state.chat, m.view))}" target="_blank" rel="noopener">${icon("eye")}View it</a>` : ""}
+        <div class="time">${clock(m.ts)}</div></div></div>`);
     } else if (m.role === "rimuru") {
       parts.push(`<div class="msg rimuru">${mark("rimuru", "avatar")}<div>
         <div class="bubble">${fmt(m.text)}</div><div class="time">${clock(m.ts)}</div></div></div>`);

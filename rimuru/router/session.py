@@ -30,6 +30,7 @@ from .. import memory
 from .. import skills as skillbook
 from ..models import Memory, Session, Task
 from ..recall import spill_digest
+from ..i18n import language_of, say, word
 from ..text import fold
 
 # People judge an assistant by how fast they get something that works
@@ -268,14 +269,15 @@ class RouterAgent:
         if not waiting:
             return
         self._told_ts = time.time()
-        text = (f"The AI service isn't answering right now ({why}). Your message is safe - "
-                f"I'll answer as soon as it's back." if again else
-                f"I couldn't answer that: the AI service refused it ({why}). Try saying it "
-                f"another way, or check the model with the Models button.")
         for thread_id in waiting:
             thread = self.store.threads.get(thread_id)
-            if thread is not None:
-                await self.channels.send(thread.channel, thread.key, text)
+            if thread is None:
+                continue
+            # In the language the person wrote in (rimuru/i18n.py).
+            said = next((m["text"] for m in reversed(self.store.chat_of(thread.key)) if m["role"] == "user"), "")
+            lang = language_of(said)
+            text = say("service_down" if again else "service_refused", lang, why=word(why, lang))
+            await self.channels.send(thread.channel, thread.key, text)
         self.bus.emit("router.told_failure", again=again, why=why)
 
     # ------------------------------------------------------------------ #

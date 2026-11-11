@@ -84,8 +84,9 @@ Effort is in days of working sessions. These are estimates, not promises.
 
 ### Phase 0: never lose a message, never run away (2 to 3 days)
 
-Status: done on 2026-11-11. Fault tests: `tests/test_reliability.py`. Not yet measured in a
-30-minute session on a real free model.
+Status: done on 2026-11-11 (`c959431`). Fault tests: `tests/test_reliability.py`. Measured in the
+golden run below (real free model): 1.0 Rimuru call per message, 3 watchdog calls in ~7 minutes,
+no failed call.
 
 1. **Tools that end the turn.** After `assess` (watchdog) or `reply`, `ignore`,
    `dispatch_task`, `message_worker`, `send_files`, `remember`, `forget`, `stop_task`
@@ -113,7 +114,8 @@ goes unanswered. The watchdog makes at most one call per tick. Rimuru averages a
 
 ### Phase 1: give people the result, not a folder (4 to 6 days)
 
-Status: not started.
+Status: done on 2026-11-11. Golden run with Kilo's free models and the Docker sandbox: **10 of 10**
+end with something that opens (9 pages, 1 Flask preview), about 40 s and 5 AI requests a job.
 
 1. **View it.** A link in the clone's final message and on its card opens what was built.
    Pages are served from their own address, so a built page can never touch the app's own
@@ -133,7 +135,9 @@ request ends with a working preview or a plain explanation.
 
 ### Phase 2: make it shippable (5 to 7 days)
 
-Status: not started.
+Status: done on 2026-11-11, except: the new name (the owner's call), money per job (dropped with
+pricing; requests are capped instead), and the fresh-machine install timing, which needs a
+published release.
 
 1. **Identity.** An original name, a licence, version 0.1.0, a changelog.
 2. **Install.** CI publishes the app image and the sandbox image, so the first start

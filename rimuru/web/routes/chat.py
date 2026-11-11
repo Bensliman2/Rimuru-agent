@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from ... import commands, persona
 from ... import sessions as chats
 from ... import skills as skillbook
+from .. import friendly
 from ..shared import Web, channel_of, session_key
 
 
@@ -51,6 +52,10 @@ def add_routes(app: FastAPI, web: Web) -> None:
             if item.get("role") == "memory" and not item.get("forgot"):
                 # Still kept? Then it can be forgotten from here.
                 item["kept"] = item.get("memory_id") in store.memories
+            if item.get("role") == "rimuru" and item.get("worker_id"):
+                # A clone telling how its job went: the page it made, to open.
+                clone = store.sessions.get(item["worker_id"])
+                item["view"] = friendly.view_of(store, clone) if clone else ""
         # Show, inside the conversation, when Rimuru hands work to a clone and
         # when that work comes back - so the chat and the clones connect.
         thread = session_thread(chat)

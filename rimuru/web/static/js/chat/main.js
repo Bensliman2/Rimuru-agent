@@ -13,6 +13,7 @@ import { renderSessions } from "./sessions.js";
 import { openSkills } from "./skills.js";
 import { renderStatus } from "./status.js";
 import "./bar.js";
+import { startTranslating } from "../i18n.js";
 import "./connections.js";
 
 export async function refreshChat() {
@@ -29,6 +30,7 @@ export async function refresh() {
     renderSessions(list.items);
     const w = await api(`/api/work?chat=${encodeURIComponent(state.chat || "direct")}`);
     setupPage(!!w.setup_needed);
+    state.viewPort = w.view_port || 0;
     renderStatus(w); renderClones(w); renderFolder(w.folder);
   } catch {
     $("status").className = "status offline";
@@ -83,3 +85,4 @@ setInterval(() => {
 }, 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 input.focus();
+startTranslating();

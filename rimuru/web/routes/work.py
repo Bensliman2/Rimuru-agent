@@ -48,6 +48,7 @@ def add_routes(app: FastAPI, web: Web) -> None:
             "demo": overview["demo"],
             "demo_forced": system.config.demo_forced(),
             "setup_needed": system.setup_needed(),
+            "view_port": app.state.view_port,
             "save_problem": system.store.save_problem,
             "blocked": overview["blocked"],
             "quota": overview["quota"],

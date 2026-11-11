@@ -13,6 +13,7 @@ from typing import Any
 from .. import persona
 from ..models import TERMINAL
 from .. import skills as skillbook
+from .viewer import view_path
 
 PASSED_RE = re.compile(r"(\d+) passed")
 FAILED_RE = re.compile(r"(\d+) failed")
@@ -208,6 +209,11 @@ def _summary(store, session) -> dict[str, Any]:
     return summary
 
 
+def view_of(store, session) -> str:
+    """The page a clone made, to open with "View it" - or ""."""
+    return view_path(_summary(store, session)["files"])
+
+
 def worker_card(store, session, conversation_channels) -> dict[str, Any]:
     task = store.tasks.get(session.task_id or "")
     summary = _summary(store, session)
@@ -247,6 +253,7 @@ def worker_card(store, session, conversation_channels) -> dict[str, Any]:
         "finished_ts": finished,
         "elapsed": (finished or time.time()) - (started or session.created_ts),
         "files": files,
+        "view": view_path(files),
         "edited": sorted(edited),
         "tests": tests,
         "result": plain(task.result) if task and task.status in {"done", "failed"}

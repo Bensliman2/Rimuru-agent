@@ -25,6 +25,7 @@ import hashlib
 import os
 import random
 import re
+import shlex
 import shutil
 import subprocess
 import threading
@@ -212,6 +213,13 @@ class DockerShell:
             try:
                 have = subprocess.run(["docker", "image", "inspect", self.image],
                                       capture_output=True, timeout=30)
+                ready_made = os.environ.get("RIMURU_SANDBOX_PULL", "").strip()
+                if have.returncode != 0 and ready_made:
+                    # A published image: a download instead of a build (release.yml).
+                    pulled = subprocess.run(["docker", "pull", ready_made], capture_output=True, timeout=900)
+                    if pulled.returncode == 0:
+                        subprocess.run(["docker", "tag", ready_made, self.image], capture_output=True, timeout=60)
+                        have = pulled
                 if have.returncode != 0:
                     build = subprocess.run(
                         ["docker", "build", "-t", self.image, str(SANDBOX_DIR)],
@@ -234,6 +242,7 @@ class DockerShell:
             "--label", f"rimuru.workspace={self.owner}",
             "--network", network,
             "--memory", self.memory, "--cpus", self.cpus, "--pids-limit", "256",
+            *(["--runtime", runtime] if (runtime := os.environ.get("RIMURU_SANDBOX_RUNTIME", "").strip()) else []),
             "--read-only", "--tmpfs", "/tmp:rw,size=512m",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "-e", "HOME=/tmp", "-e", "PYTHONDONTWRITEBYTECODE=1",
@@ -263,6 +272,74 @@ class DockerShell:
                 # Where Node looks first. Not over a project's own node_modules.
                 args += ["-v", f"{modules.resolve()}:/workspace/node_modules:ro"]
         return args + [self.image, "sh", "-c", command]
+
+    # ------------------------------------------------------------------ #
+    # previews: a project's own server, to open in the browser
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def preview_supported() -> bool:
+        """Only with Docker on this computer: in the Docker setup the sandbox is a
+        Docker of its own, and its ports are not this computer's."""
+        return not (os.environ.get("DOCKER_HOST") or "").startswith(("tcp://", "ssh://"))
+
+    def preview_name(self, folder: Path) -> str:
+        return "rimuru-preview-" + hashlib.sha256(str(Path(folder).resolve()).lower().encode()).hexdigest()[:10]
+
+    def _preview_args(self, command: str, port: int, name: str, workdir: Path | None,
+                      deps: Path | None, seconds: int) -> list[str]:
+        """Like a command's container - only its folder, keys hidden, capabilities
+        dropped - but it keeps running, may reach the internet (an app may call
+        an API) and is reachable from this computer only, on a port Docker picks.
+        It stops by itself after `seconds`."""
+        args = self._args(f"exec timeout {int(seconds)} sh -c {shlex.quote(command)}", name, workdir, deps)
+        args[args.index("--network") + 1] = "bridge"
+        args.remove("--rm")             # kept after it stops, so its output can be read
+        args.insert(2, "-d")
+        image_at = len(args) - 4                      # image, "sh", "-c", command
+        args[image_at:image_at] = ["-p", f"127.0.0.1::{int(port)}", "-e", f"PORT={int(port)}",
+                                   "-e", "HOST=0.0.0.0", "--label", "rimuru.preview=1"]
+        return args
+
+    async def preview(self, command: str, port: int, *, workdir: Path | None = None,
+                      deps: Path | None = None, minutes: int = 60) -> tuple[str, str]:
+        """Start the project's server and return the address to open it."""
+        if not self.preview_supported():
+            return "failed", ("Previews of a running server need Docker on this computer. In the "
+                              "Docker setup, open built pages with the View it link instead.")
+        unavailable = await self._wait_ready()
+        if unavailable:
+            return "failed", f"sandbox unavailable: {unavailable}"
+        folder = Path(workdir or self.workspace).resolve()
+        name = self.preview_name(folder)
+        await asyncio.to_thread(subprocess.run, ["docker", "rm", "-f", name], capture_output=True, timeout=60)
+        started = await asyncio.to_thread(
+            subprocess.run, self._preview_args(command, port, name, folder, deps, minutes * 60),
+            capture_output=True, encoding="utf-8", errors="replace", timeout=120)
+        if started.returncode != 0:
+            return "failed", f"could not start it: {(started.stderr or started.stdout)[-600:]}"
+        mapped = await asyncio.to_thread(subprocess.run, ["docker", "port", name, f"{int(port)}/tcp"],
+                                         capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+        host_port = (mapped.stdout.strip().splitlines() or [""])[0].rsplit(":", 1)[-1]
+        url = f"http://127.0.0.1:{host_port}/"
+        import httpx
+
+        async with httpx.AsyncClient(timeout=3.0) as http:
+            for _ in range(30 if host_port.isdigit() else 0):
+                try:
+                    if (await http.get(url)).status_code < 500:
+                        return "done", url
+                except httpx.HTTPError:
+                    pass
+                running = await asyncio.to_thread(
+                    subprocess.run, ["docker", "inspect", "-f", "{{.State.Running}}", name],
+                    capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+                if running.stdout.strip() != "true":
+                    break
+                await asyncio.sleep(1.0)
+        logs = await asyncio.to_thread(subprocess.run, ["docker", "logs", "--tail", "40", name],
+                                       capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+        await asyncio.to_thread(subprocess.run, ["docker", "rm", "-f", name], capture_output=True, timeout=60)
+        return "failed", f"it did not answer on port {port}. Its output:\n{(logs.stdout + logs.stderr)[-2000:]}"
 
     def _blank(self) -> Path:
         self.blank_dir.mkdir(parents=True, exist_ok=True)

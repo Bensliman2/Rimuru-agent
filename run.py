@@ -7,6 +7,8 @@
     python run.py bench --scenario smoke --speed 1
                                                    real-model test with a pass/fail verdict
     python run.py --demo                           no AI model at all (offline stand-in)
+    python run.py golden --url http://127.0.0.1:8802
+                                                   ten everyday requests with a real model, graded
     python run.py hands --connect http://PC:8810 --code CODE --root FOLDER
                                                    on another machine: let sessions work there
 
@@ -58,6 +60,7 @@ def serve(args: argparse.Namespace) -> int:
 
     host = args.host or config.host
     port = args.port or config.port
+    app.state.view_port = config.view_port if config.view_port != port else 0
 
     print(f"\n  Rimuru  ->  http://{host}:{port}")
     print(f"  models: {app.state.system.provider_note}")
@@ -396,6 +399,45 @@ def trace(args: argparse.Namespace) -> int:
     return 0
 
 
+def data_command(command: str, rest: list[str]) -> int:
+    """export / import / wipe: the person's data (rimuru/data_tools.py)."""
+    from pathlib import Path
+
+    from rimuru import data_tools
+
+    parser = argparse.ArgumentParser(prog=f"python run.py {command}")
+    if command != "wipe":
+        parser.add_argument("file", nargs="?" if command == "export" else None,
+                            default=f"rimuru-export-{time.strftime('%Y%m%d')}.zip")
+    parser.add_argument("--data", default=None, help="the data folder, as for serve")
+    args = parser.parse_args(rest)
+    args.workers = None
+    args.demo = False
+    args.provider = None
+    config = _apply_args(args)
+    try:
+        if command == "export":
+            counts = data_tools.export(config, Path(args.file))
+            print(f"Saved {args.file}: the database, {counts['files']} files from the sessions, and "
+                  f"your model choices. API keys are not in it.")
+        elif command == "import":
+            counts = data_tools.import_(config, Path(args.file))
+            print(f"Imported into {config.db_path.parent}: the database and {counts['files']} files. "
+                  f"Add your API keys again with the Models button.")
+        else:
+            print(f"This deletes every chat, job, memory and session folder in {config.db_path.parent}.")
+            print("It cannot be undone. Export first if you may want them back.")
+            if input('Type "delete everything" to go on: ').strip().lower() != "delete everything":
+                print("Nothing was deleted.")
+                return 1
+            gone = data_tools.wipe(config)
+            print(f"Deleted {len(gone)} items.")
+    except (ValueError, OSError) as exc:
+        print(f"Could not {command}: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main() -> int:
     import logging
 
@@ -406,6 +448,23 @@ def main() -> int:
         from rimuru.hands.daemon import main as hands_main
 
         return hands_main(sys.argv[2:])
+    if sys.argv[1:2] in (["export"], ["import"], ["wipe"]):
+        return data_command(sys.argv[1], sys.argv[2:])
+    if sys.argv[1:2] in (["--version"], ["version"]):
+        from rimuru import __version__
+
+        print(f"Rimuru {__version__}")
+        return 0
+    if sys.argv[1:2] == ["golden"]:
+        # Ten everyday requests, run for real and graded (scenarios/golden/run_golden.py).
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parent / "scenarios" / "golden" / "run_golden.py"
+        spec = importlib.util.spec_from_file_location("run_golden", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.main(sys.argv[2:])
     if sys.argv[1:2] == ["speed"]:
         # How long everyday requests take, end to end (scenarios/speed/run_speed.py).
         # It has its own options, so it gets the command line as it is.

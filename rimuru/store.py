@@ -42,6 +42,10 @@ from .models import (
 
 log = logging.getLogger("rimuru.store")
 
+# Raised whenever the tables change. A database from before is backed up first
+# (data/backups) and then brought up to date; one from after is refused.
+SCHEMA_VERSION = 1
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS triggers (
     id TEXT PRIMARY KEY, ts REAL, channel TEXT, thread_key TEXT, thread_id TEXT,
@@ -205,6 +209,7 @@ class Store:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
+        self._check_version()
 
         # In-memory mirror, authoritative for the running process.
         self.triggers: dict[str, Trigger] = {}
@@ -685,6 +690,28 @@ class Store:
             row = self._conn.execute("SELECT data FROM contexts WHERE session_id = ?",
                                      (session_id,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def _check_version(self) -> None:
+        """A database from an older Rimuru is backed up before anything changes it;
+        one from a newer Rimuru is refused rather than damaged."""
+        row = self._conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        found = int(row[0]) if row and str(row[0]).isdigit() else 0
+        if found > SCHEMA_VERSION:
+            self._conn.close()
+            raise RuntimeError(f"This data was made by a newer Rimuru (data version {found}, this one "
+                               f"reads up to {SCHEMA_VERSION}). Update Rimuru, or use another --data folder.")
+        if found == SCHEMA_VERSION:
+            return
+        has_data = self._conn.execute("SELECT 1 FROM sessions LIMIT 1").fetchone() is not None
+        if has_data:
+            from .data_tools import backup
+
+            self._conn.commit()
+            kept = backup(self.db_path, f"before-v{SCHEMA_VERSION}")
+            log.warning("data version %s -> %s: backed up to %s", found, SCHEMA_VERSION, kept)
+        self._conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
+                           (str(SCHEMA_VERSION),))
+        self._conn.commit()
 
     def save_inbox(self, session_id: str, items: list[dict[str, Any]]) -> None:
         """What waits for an agent, not yet taken in (agent/loop.py)."""

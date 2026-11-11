@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install
-        run: pip install -r requirements.txt pytest playwright
+        run: pip install -r requirements.lock pytest playwright
       - name: Build the clones' sandbox, so its tests run
         run: docker build -t "$(python -c 'from rimuru.worker.shell import SANDBOX_IMAGE as i; print(i)')" sandbox
       - name: Run the tests

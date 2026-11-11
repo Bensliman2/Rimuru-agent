@@ -69,6 +69,17 @@ FILES ARE SHARED
   refused if the file changed since. If a write or edit is refused, read the
   file again and merge - never drop changes someone else made.
 
+MAKE IT SOMETHING THEY CAN OPEN
+  The person may not be technical: what you hand over should open in a browser.
+    - A page or a small app: one folder with an index.html at the top (styles
+      and scripts beside it or inside it), unless they asked for something else.
+      The app gives them a View it link to it by itself.
+    - An app that needs a server (Python, Node): build it, test it, then call
+      preview() if you have it, and put the address it returns in for_person.
+    - If it cannot run here (Java, a database server, Docker, a phone app), say
+      so in one plain sentence in for_person, and offer what can be done instead.
+  End for_person with how to see or use what you made.
+
 FINISHING
   finish() ends the session. Call it once, with an honest summary: what you did,
   what you verified, and anything you could not confirm. If you failed, say so
@@ -420,6 +431,19 @@ class WorkerAgent:
                 obj(command=s("Command to run"), timeout=s("Seconds, default 60", optional=True)),
                 self._tool_bash,
             )
+        if getattr(self.shell, "kind", "simulated") == "docker" and                 getattr(self.shell, "preview_supported", lambda: False)():
+            reg.add(
+                "preview",
+                "Run the app you built so the person can open it in their browser: its "
+                "server starts in a container of its own, and you get the address back. "
+                "Use it for an app with a server (Flask, FastAPI, Express...); a plain "
+                "page needs nothing - the person gets a View it link anyway. The server "
+                "must listen on 0.0.0.0 and on the port you give (also in $PORT). It "
+                "stops by itself after an hour. Put the address in for_person.",
+                obj(command=s("The command that starts the server, e.g. 'python app.py' or 'npm start'"),
+                    port=s("The port it listens on, e.g. 5000")),
+                self._tool_preview,
+            )
         if getattr(self.shell, "kind", "simulated") == "docker":
             reg.add(
                 "install",
@@ -704,6 +728,22 @@ class WorkerAgent:
         except Exception as exc:  # noqa: BLE001
             return f"Could not write {raw}: {exc}"
         return f"Edited {raw} (new version: {_version(text)})"
+
+    async def _tool_preview(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        command = str(args.get("command") or "").strip()
+        try:
+            port = int(str(args.get("port") or "").strip())
+        except ValueError:
+            return "Give the port the server listens on, as a number (e.g. 5000)."
+        if not command or not 1 <= port <= 65535:
+            return "Give the command that starts the server, and the port it listens on."
+        self.store.touch_session(self.session, current_activity="starting a preview")
+        status, out = await self.shell.preview(command, port, workdir=self.root, deps=self.deps)
+        if status != "done":
+            return f"The preview did not start: {out}"
+        self.bus.emit("worker.preview", session_id=self.session.id, url=out)
+        return (f"Running at {out} - the person can open it on this computer. Put this address in "
+                f"for_person. It stops by itself after an hour.")
 
     async def _tool_install(self, args: dict[str, Any], loop: AgentLoop) -> str:
         kind = str(args.get("kind") or "python").strip().lower()

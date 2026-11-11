@@ -96,7 +96,7 @@ function renderConnections(st) {
   $("conn-body").innerHTML = `
     <section class="conn" id="conn-tg">${telegramSection(tg)}</section>
     <section class="conn">
-      <div class="conn-head"><h3>GitHub</h3>${stateTag(gh.state)}</div>
+      <div class="conn-head"><h3>GitHub</h3><span class="conn-state warn">Experimental</span>${stateTag(gh.state)}</div>
       <p class="conn-what">Rimuru answers on issues and pull requests when someone you allow writes <code>${esc(gh.mention)}</code> - and opens a <b>draft</b> pull request with its work. It never merges.</p>
       ${gh.problem ? `<p class="form-error">${esc(gh.problem)}</p>` : ""}
       ${gh.login ? `<p class="conn-hint">Working as <b>${esc(gh.login)}</b>.</p>` : `
@@ -135,7 +135,7 @@ function renderMachines(h, pairing) {
   }
   const runs = (m) => m.docker ? "commands in its Docker sandbox" : m.host_commands ? "commands right on that machine" : "no commands";
   box.innerHTML = `
-    <div class="conn-head"><h3>Other machines</h3>${stateTag(h.machines.some((m) => m.online) ? "connected" : "off")}</div>
+    <div class="conn-head"><h3>Other machines</h3><span class="conn-state warn">Experimental</span>${stateTag(h.machines.some((m) => m.online) ? "connected" : "off")}</div>
     <p class="conn-what">Let a session work in a folder on another computer - a server, a second PC. Rimuru thinks here; the files and commands are there, only in the folders that machine shares.</p>
     ${h.problem ? `<p class="form-error">${esc(h.problem)}</p>` : ""}
     ${h.machines.length ? `<ul class="conn-people">${h.machines.map((m) => `<li><span><b>${esc(m.name)}</b>

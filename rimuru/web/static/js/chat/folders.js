@@ -1,6 +1,6 @@
 /* Rimuru's chat page: where a session works. */
 import { $, api, esc, icon, post } from "../shared.js";
-import { scrimOff, state } from "./base.js";
+import { scrimOff, state, viewUrl } from "./base.js";
 import { input } from "./composer.js";
 import { messagesEl } from "./conversation.js";
 import { closePanel } from "./details.js";
@@ -25,6 +25,12 @@ export function renderFolder(info) {
     $("folder-bar").title = `This session's files are in ${i.path}`;
   }
   $("fb-open").hidden = !(i.kind !== "new" && i.exists);
+  const view = viewUrl(state.chat, i.view);
+  $("fb-view").hidden = !view;
+  if (view) $("fb-view").href = view;
+  const download = i.exists && i.kind !== "remote" && i.kind !== "new";
+  $("fb-download").hidden = !download;
+  if (download) $("fb-download").href = `/api/session/zip?chat=${encodeURIComponent(state.chat || "")}`;
   const change = $("fb-change");
   change.disabled = !!i.working;
   change.title = i.working ? "Wait until this session's clones finish, or stop them"

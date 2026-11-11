@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from .. import commands
+from ..i18n import say
 from ..safety import scrubbed
 from ..ids import new_id
 from ..models import Trigger
@@ -28,10 +29,6 @@ log = logging.getLogger("rimuru.telegram")
 
 MAX_TEXT = 4000            # Telegram allows 4096 characters per message
 MAX_FILE = 10 * 1024 * 1024
-WELCOME = ("Hi {name}! I'm Rimuru, your assistant. Tell me what you'd like built or fixed, and I'll "
-           "put one of my clones on it - I'll tell you here when it's done.\n\n"
-           "/status - how your work is going\n"
-           "Type /skill_ and a skill's name before a message to make the job follow one of your skills.")
 
 
 class Problem(RuntimeError):
@@ -147,7 +144,9 @@ class TelegramChannel:
         if private and commands.parse(text) in {"start", "help"}:
             # Telegram sends /start when someone first opens the bot: greet them,
             # no AI call needed.
-            await self.send(chat_id, WELCOME.format(name=name))
+            # In the language their Telegram is set to, when there is one for it.
+            lang = str(user.get("language_code") or "en")[:2].lower()
+            await self.send(chat_id, say("welcome", lang if lang in {"fr", "ar"} else "en", name=name))
         elif private:
             # The same as in the app: /status, /init, /skill_<name> before a message.
             done = await self.system.person_says(text, channel="telegram", thread_key=f"tg-{chat_id}",

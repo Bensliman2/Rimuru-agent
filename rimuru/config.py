@@ -106,6 +106,8 @@ class Config:
     # --- web ---
     host: str = field(default_factory=lambda: os.environ.get("RIMURU_HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: _int("RIMURU_PORT", 8800))
+    # What clones build is opened from a port of its own (rimuru/web/viewer.py).
+    view_port: int = field(default_factory=lambda: _int("RIMURU_VIEW_PORT", 8820))
 
     # --- storage ---
     db_path: Path = field(default_factory=lambda: Path(os.environ.get("RIMURU_DB", "./data/rimuru.db")).resolve())

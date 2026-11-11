@@ -1,15 +1,57 @@
 """What the API's features share: how to find a session and where it works."""
 from __future__ import annotations
 
+import os
 import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
 from .. import sessions as chats
 from ..hands import remote
+
+
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+HERE = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def host_of(value: str) -> str:
+    value = (value or "").strip().lower()
+    if value.startswith("["):
+        return value[1:value.find("]")] if "]" in value else value
+    return value.split(":", 1)[0]
+
+
+class Guard:
+    """Who may ask. The app stores API keys and can point models at any server,
+    so it answers only this computer: no other website may drive it (cross-site
+    requests), and no other host name may reach it (DNS rebinding). Serving on a
+    network address (RIMURU_HOST=0.0.0.0) is a deliberate choice;
+    RIMURU_ALLOWED_HOSTS lists extra names to accept."""
+
+    def __init__(self, config: Any) -> None:
+        extra = {h.strip().lower() for h in os.environ.get("RIMURU_ALLOWED_HOSTS", "").split(",") if h.strip()}
+        self.allowed = LOCAL_HOSTS | {config.host.lower()} | extra
+        self.open_host = config.host in {"0.0.0.0", "::"}
+        # Unless the app is served beyond this computer on purpose, only this
+        # computer gets an answer - by the caller's address, not only the Host
+        # header. (Other machines reach Rimuru only through the hands' own port.)
+        self.beyond = self.open_host or bool(extra)
+
+    def refuse(self, headers: Any, method: str, caller: str | None = None) -> str | None:
+        host = headers.get("host", "")
+        if not self.beyond and caller and caller not in HERE and not caller.startswith("127."):
+            return "This app only answers on this computer."
+        if not self.open_host and host_of(host) not in self.allowed:
+            return "This app only answers on this computer."
+        origin = headers.get("origin")
+        if origin and method not in {"GET", "HEAD", "OPTIONS"} and \
+                urlparse(origin).netloc.lower() != host.lower():
+            return "Requests from other websites are refused."
+        return None
 
 
 def channel_of(key: str) -> str:
@@ -64,8 +106,9 @@ class Web:
         if kind == "new" or path is None:
             return {"kind": "new", "name": "", "path": "", "shown": "", "exists": False,
                     "working": self.busy_in(thread)}
+        page = next((n for n in ("index.html", "index.htm") if (path / n).is_file()), "")
         return {"kind": kind, "name": path.name, "path": str(path), "shown": chats.display(path),
-                "exists": path.is_dir(), "working": self.busy_in(thread)}
+                "exists": path.is_dir(), "working": self.busy_in(thread), "view": page}
 
     def task_folder(self, task) -> Path:
         if task is not None and task.folder:

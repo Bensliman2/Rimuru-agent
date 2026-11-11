@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 
 from ... import folders
 from ... import sessions as chats
 from ...hands import remote
 from ...hands.hub import RemoteError as HandsRemoteError, Unavailable as HandsUnavailable
 from ..shared import Web, channel_of, session_key
+from ..viewer import zip_folder
 
 
 def add_routes(app: FastAPI, web: Web) -> None:
@@ -87,6 +90,21 @@ def add_routes(app: FastAPI, web: Web) -> None:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
         return {"ok": True, "path": str(path)}
+
+    @app.get("/api/session/zip")
+    async def session_zip(chat: str) -> Response:
+        """The session's files as one zip - never the files that hold keys."""
+        info = folder_info(session_key(chat))
+        if info["kind"] in {"new", "remote"} or not info["exists"]:
+            raise HTTPException(404, "This session has no folder of files here yet.")
+        try:
+            data = await asyncio.to_thread(zip_folder, Path(info["path"]))
+        except ValueError as exc:
+            raise HTTPException(413, str(exc)) from None
+        name = re.sub(r"[^\w.-]+", "-", info["name"]).strip("-") or "files"
+        return Response(data, media_type="application/zip", headers={
+            "Content-Disposition": f"attachment; filename=\"{name.encode('ascii', 'ignore').decode() or 'files'}.zip\"; "
+                                   f"filename*=UTF-8''{quote(name)}.zip"})
 
     @app.post("/api/session/open-folder")
     async def open_session_folder(payload: dict[str, Any]) -> dict[str, Any]:

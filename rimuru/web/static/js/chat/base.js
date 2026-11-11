@@ -16,7 +16,15 @@ export const mark = (kind, cls = "") =>
 // Light formatting for Rimuru's messages: `code` and **bold**, nothing else.
 export const fmt = (text) => esc(text)
   .replace(/`([^`\n]+)`/g, "<code>$1</code>")
-  .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+  .replace(/(https?:\/\/[^\s<"]+[^\s<".,;:!?)\]])/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+
+// Where what a clone built opens: the app's viewer, on a port of its own
+// (rimuru/web/viewer.py), so a built page can never reach the app's controls.
+export const viewUrl = (key, path) => (state.viewPort && key && path
+  ? `${location.protocol}//${location.hostname}:${state.viewPort}/${encodeURIComponent(key)}/`
+    + String(path).split("/").map(encodeURIComponent).join("/")
+  : "");
 
 export const state = { cards: [], openId: null, panelSig: "", chatSig: "", busy: false, sessionsLimit: 60, sessionsTotal: 0 };
 

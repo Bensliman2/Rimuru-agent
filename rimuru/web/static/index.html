@@ -51,6 +51,10 @@
       <button class="bar-btn" id="models-btn" title="Choose which AI does each job">
         <svg><use href="#i-sliders"/></svg><span>Models</span>
       </button>
+      <label class="bar-btn lang-pick" title="Language">
+        <svg><use href="#i-globe"/></svg><span id="lang-name" data-no-i18n>English</span>
+        <select id="lang" aria-label="Language"></select>
+      </label>
     </div>
     <button class="stop" id="stop" disabled title="Stop everything Rimuru is working on">
       <svg><use href="#i-stop"/></svg><span>Stop</span>
@@ -90,6 +94,9 @@
         <span class="fb-label" id="fb-label">New folder for this session</span>
         <span class="fb-path" id="fb-path"></span>
       </div>
+      <a class="ghost small" id="fb-view" target="_blank" rel="noopener" hidden
+         title="Open the page this session's clones made, in a new tab">View it</a>
+      <a class="ghost small" id="fb-download" hidden title="All this session's files, as one zip">Download</a>
       <button type="button" class="ghost small" id="fb-open" hidden>Open</button>
       <button type="button" class="ghost small" id="fb-change">Change</button>
     </div>

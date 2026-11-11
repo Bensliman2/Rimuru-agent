@@ -141,3 +141,24 @@ def test_a_folder_named_in_arabic_mounts_and_works(tmp_path):
     assert status == "done", out
     assert "مرحبا" in out, "the file's text comes back readable"
     assert (folder / "نتيجة.txt").read_text(encoding="utf-8").strip() == "تم"
+
+
+def test_a_preview_runs_the_app_and_can_be_opened(shell, tmp_path):
+    import httpx
+
+    (tmp_path / "index.html").write_text("<h1>preview works</h1>", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=never-served-123456", encoding="utf-8")
+    status, url = asyncio.run(shell.preview("python -m http.server $PORT --bind 0.0.0.0", 8000, workdir=tmp_path,
+                                            minutes=2))
+    try:
+        assert status == "done", url
+        assert url.startswith("http://127.0.0.1:")
+        assert "preview works" in httpx.get(url, timeout=10).text
+        assert "never-served" not in httpx.get(url + ".env", timeout=10).text, "keys are hidden in a preview too"
+    finally:
+        subprocess.run(["docker", "rm", "-f", shell.preview_name(tmp_path)], capture_output=True)
+
+
+def test_a_preview_that_never_answers_says_why(shell, tmp_path):
+    status, out = asyncio.run(shell.preview("echo starting && exit 3", 8000, workdir=tmp_path, minutes=1))
+    assert status == "failed" and "starting" in out

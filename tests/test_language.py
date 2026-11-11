@@ -249,3 +249,63 @@ def test_a_change_of_course_is_noticed(text):
                                   "also add coupons"])
 def test_an_addition_is_not_a_change_of_course(text):
     assert not CORRECTION.search(fold(text)), text
+
+
+# ---------------------------------------------------------------------- #
+# The app's own lines, in the person's language (rimuru/i18n.py)
+# ---------------------------------------------------------------------- #
+@pytest.mark.parametrize("text, expected", [
+    ("مرحبا كيف حالك", "ar"), ("Crée une page pour mon café", "fr"), ("je veux un site", "fr"),
+    ("Build a calculator", "en"), ("", "en"), ("ok", "en"),
+])
+def test_the_language_of_a_message(text, expected):
+    from rimuru.i18n import language_of
+
+    assert language_of(text) == expected
+
+
+def test_a_failing_service_is_told_in_arabic(tmp_path):
+    import re as _re
+
+    from rimuru.ids import new_id
+    from rimuru.llm.base import LLMResponse, ToolCall
+    from rimuru.llm.openai_client import ProviderError
+
+    class Busy:
+        def __init__(self):
+            self.calls = 0
+
+        async def complete(self, *, system, messages, tools, max_tokens=2048, role="worker"):
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError("gave up after 6 attempts: HTTP 429: busy")
+            found = _re.findall(r"thr_[0-9a-z]+", str(messages[-1].content))
+            return LLMResponse(text="", tool_calls=[ToolCall(id=new_id("step"), name="reply",
+                                                             args={"thread_id": found[-1], "text": "تم"})])
+
+    async def run():
+        system = make_system(tmp_path)
+        system.router.loop.client = Busy()
+        system.router.loop.retry_base = 0.01
+        await system.start()
+        await system.person_says("مرحبا، هل أنت هنا؟", thread_key="s-lang0001")
+        for _ in range(100):
+            said = [m["text"] for m in system.store.chat_of("s-lang0001") if m["role"] == "rimuru"]
+            if "تم" in said:
+                break
+            await asyncio.sleep(0.05)
+        assert any("رسالتك محفوظة" in t and "طلبات كثيرة" in t for t in said), said
+        await system.stop()
+
+    asyncio.run(run())
+
+
+def test_a_pasted_key_is_explained_in_french(tmp_path):
+    async def run():
+        system = make_system(tmp_path)
+        done = await system.person_says("voici ma clé sk-abcdefghijklmnopqrstuvwxyz012345 pour le site",
+                                        thread_key="s-lang0002")
+        assert "masqué" in done["said"]
+        system.store.close()
+
+    asyncio.run(run())

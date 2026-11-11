@@ -3,6 +3,9 @@ import { $, esc, isLive } from "../shared.js";
 import { state } from "./base.js";
 
 export function renderStatus(o) {
+  // Practice runs are for people working on Rimuru itself (RIMURU_DEV=1).
+  const practice = document.querySelector('[role=tab][data-view="practice"]');
+  if (practice) practice.hidden = !o.dev;
   const live = state.connected;
   const blocked = (o.blocked || [])[0];
   $("status").className = `status ${live && !o.demo && !blocked ? "online" : "offline"}`;

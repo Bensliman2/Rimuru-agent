@@ -162,3 +162,7 @@ html { background: var(--bg); }
     animation: none !important;
   }
 }
+
+/* Right to left (Arabic): tooltips open toward the page, and nothing slides while the direction is set */
+[dir="rtl"] .tip { right: auto; left: 0; text-align: right; }
+.no-motion *, .no-motion *::before, .no-motion *::after { transition: none !important; }

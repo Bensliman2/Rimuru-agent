@@ -136,3 +136,11 @@
 @media (hover: none) {
   .session-del { opacity: .7; }
 }
+
+/* Right to left (Arabic): the drawer slides in from the right, and stays off the page when closed */
+@media (max-width: 1240px) {
+  [dir="rtl"] .sessions {
+    left: auto; right: 0; border-right: 0; border-left: 1px solid var(--border); transform: translateX(105%);
+  }
+  [dir="rtl"] .sessions.open { transform: none; }
+}

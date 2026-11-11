@@ -37,7 +37,8 @@ def serve(folder: Path, *flags: str):
     """The real app, on its own port and its own data, as `python run.py` runs it."""
     port = free_port()
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "RIMURU_HANDS_HOST": "127.0.0.1",
-           "RIMURU_HANDS_PORT": str(free_port()), "RIMURU_MODELS": str(folder / "models.toml"),
+           "RIMURU_HANDS_PORT": str(free_port()), "RIMURU_VIEW_PORT": str(free_port()),
+           "RIMURU_MODELS": str(folder / "models.toml"),
            "RIMURU_ENV_FILE": str(folder / ".env"), "RIMURU_SKILLS": str(folder / "skills")}
     process = subprocess.Popen(
         [sys.executable, "run.py", *flags, "--speed", "6", "--data", str(folder / "data"), "--port", str(port)],
@@ -172,7 +173,7 @@ def test_arabic_reads_right_to_left(page, demo):
     assert bubble.evaluate("e => getComputedStyle(e).unicodeBidi") == "plaintext"
 
 
-@pytest.mark.parametrize("view", ["overview", "rimuru", "clones", "watchdog", "messages", "memory", "practice"])
+@pytest.mark.parametrize("view", ["overview", "rimuru", "clones", "watchdog", "messages", "memory"])
 def test_under_the_hood(page, demo, view):
     page.goto(f"{demo}/inside")
     page.locator(f'[role=tab][data-view="{view}"]').click()
@@ -210,7 +211,7 @@ def test_on_a_phone_the_buttons_are_in_a_menu_and_stop_is_not(browser, demo):
     context.close()
 
 
-@pytest.mark.parametrize("width", [1320, 1240, 1150, 1090, 1081, 1000, 800, 761, 760, 600, 375])
+@pytest.mark.parametrize("width", [1440, 1320, 1240, 1201, 1200, 1150, 1090, 1081, 1000, 800, 761, 760, 600, 375])
 def test_the_top_bar_fits_at_every_width(browser, demo, width):
     context = browser.new_context(viewport={"width": width, "height": 800})
     tab = context.new_page()
@@ -299,3 +300,49 @@ def test_a_failed_model_can_be_tried_again(browser, tmp_path):
     finally:
         process.kill()
         process.wait()
+
+
+def test_what_a_clone_built_opens_from_the_chat(page, demo):
+    page.goto(demo)
+    say(page, "Make a simple to-do list page in a single HTML file")
+    expect(page.locator(".msg.user .bubble").first).to_be_visible()
+    expect(page.locator(".session.on[data-chat]")).to_have_count(1)
+    key = page.locator(".session.on[data-chat]").get_attribute("data-chat")
+    for _ in range(100):
+        folder = httpx.get(f"{demo}/api/work", params={"chat": key}).json()["folder"]
+        if folder.get("path"):
+            break
+        time.sleep(0.2)
+    Path(folder["path"]).mkdir(parents=True, exist_ok=True)
+    (Path(folder["path"]) / "index.html").write_text("<h1>My to-do list</h1>", encoding="utf-8")
+    (Path(folder["path"]) / ".env").write_text("TOKEN=never-shown-123456", encoding="utf-8")
+    page.reload()
+    view = page.locator("#fb-view")
+    expect(view).to_be_visible()
+    href = view.get_attribute("href")
+    assert href.startswith("http://127.0.0.1:") and demo.split(":")[-1] not in href.split("/")[2], "its own port"
+    opened = page.context.new_page()
+    opened.goto(href)
+    expect(opened.locator("h1")).to_have_text("My to-do list")
+    assert httpx.get(href.rstrip("/") + "/.env").status_code == 404
+    opened.close()
+    expect(page.locator("#fb-download")).to_be_visible()
+
+
+def test_the_interface_speaks_arabic_right_to_left(browser, demo):
+    context = browser.new_context(viewport={"width": 1320, "height": 860}, locale="ar")
+    tab = context.new_page()
+    tab.goto(demo)
+    expect(tab.locator("html")).to_have_attribute("dir", "rtl")
+    expect(tab.locator("#memory-btn")).to_contain_text("الذاكرة")
+    expect(tab.locator("#input")).to_have_attribute("placeholder", "أخبر ريمورو بما تحتاجه…")
+    assert tab.evaluate("document.documentElement.scrollWidth - innerWidth") <= 0
+    tab.locator("#lang").select_option("fr")
+    expect(tab.locator("html")).to_have_attribute("dir", "ltr")
+    expect(tab.locator("#memory-btn")).to_contain_text("Mémoire")
+    context.close()
+
+
+def test_practice_runs_are_for_developers_only(page, demo):
+    page.goto(f"{demo}/inside")
+    expect(page.locator('[role=tab][data-view="practice"]')).to_be_hidden()

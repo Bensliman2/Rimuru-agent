@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import logging.handlers
 from pathlib import Path
 from typing import Iterator
@@ -37,7 +38,8 @@ def setup(folder: Path) -> Path:
     to_file.setFormatter(plain)
     log.handlers = [h for h in log.handlers if not isinstance(h, logging.handlers.RotatingFileHandler)]
     log.addHandler(to_file)
-    log.setLevel(logging.INFO)
+    level = os.environ.get("RIMURU_LOG_LEVEL", "INFO").upper()
+    log.setLevel(getattr(logging, level, logging.INFO))
     return path
 
 

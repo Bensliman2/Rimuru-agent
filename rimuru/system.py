@@ -13,6 +13,7 @@ and tasks.
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import re
 import time
@@ -35,7 +36,8 @@ from .models import TERMINAL, Task, Trigger
 from .recall import describe_graph
 from .connections import Connections
 from .hands.hub import HandsHub
-from .safety import PASTED_KEY_NOTE, notice_for_person, redact
+from .i18n import language_of, say
+from .safety import notice_for_person, redact
 from . import commands, sessions as chats
 from .logs import noted
 from . import skills as skillbook
@@ -250,18 +252,20 @@ class RimuruSystem:
         if key is None or (provider, key) in self._told:
             return
         self._told.add((provider, key))
+        lang = self.language_of_chat(key)
         if event.get("reason") == "budget":
-            text = (f"I've made all the AI requests you allowed for this hour ({event.get('detail') or ''}). "
-                    f"I'll carry on by myself when the hour rolls over.")
+            text = say("budget", lang, detail=event.get("detail") or "")
         elif event.get("reason") == "credit":
             where = self.TOP_UP.get(provider)
-            text = (f"I can't think right now: {provider} says your account is out of credit. "
-                    f"Top it up{f' at {where}' if where else ''}, and I will carry on by myself - "
-                    f"no need to ask again.")
+            text = say("credit", lang, provider=provider, where=f" ({where})" if where else "")
         else:
-            text = (f"I can't think right now: {provider} is not accepting the API key. Check it "
-                    f"with the Models button, and I will carry on by myself.")
+            text = say("key_refused", lang, provider=provider)
         self.store.add_chat("rimuru", text, chat=key, notice="blocked")
+
+    def language_of_chat(self, key: str) -> str:
+        """The language the person last wrote in, in this chat (rimuru/i18n.py)."""
+        said = next((m["text"] for m in reversed(self.store.chat_of(key)) if m["role"] == "user"), "")
+        return language_of(said)
 
     def _on_installed(self, event: dict[str, Any]) -> None:
         key = self._chat_of(event.get("session_id", ""))
@@ -293,7 +297,7 @@ class RimuruSystem:
         told = sorted(k for p, k in self._told if p == provider)
         self._told = {(p, k) for p, k in self._told if p != provider}
         for key in told:
-            self.store.add_chat("rimuru", f"{provider} is working again - carrying on where I left off.",
+            self.store.add_chat("rimuru", say("recovered", self.language_of_chat(key), provider=provider),
                                 chat=key, notice="recovered")
 
     # ------------------------------------------------------------------ #
@@ -638,10 +642,9 @@ class RimuruSystem:
                        if t.channel in self.config.conversation_channels and self.store.chat_of(t.key)]
             if threads:
                 latest = max(threads, key=lambda t: self.store.chat_of(t.key)[-1]["ts"])
-                self.store.add_chat("rimuru", (
-                    f"Heads-up: this hour's free requests are nearly used up ({q['used']} of about "
-                    f"{q['limit']}). Work may pause for a while, and carries on by itself when it can."),
-                    chat=latest.key, notice="quota")
+                self.store.add_chat("rimuru", say("quota", self.language_of_chat(latest.key),
+                                                  used=q["used"], limit=q["limit"]),
+                                    chat=latest.key, notice="quota")
             self.bus.emit("provider.quota", **q)
 
     async def _every_minute(self) -> None:
@@ -738,14 +741,15 @@ class RimuruSystem:
         message for Rimuru. A command or a refusal is answered at once ("said")."""
         # A key pasted into the chat stops here: not stored, not sent to any AI service.
         text, pasted = redact((text or "").strip())
-        warned = {"said": PASTED_KEY_NOTE} if pasted else {}
+        note = say("pasted_key", language_of(text))
+        warned = {"said": note} if pasted else {}
         if commands.parse(text) is not None:
             return await self.run_command(thread_key, text, channel=channel)
         picked = skillbook.forced(text)
         if picked is None:
             trigger = await self.human_message(text, channel=channel, thread_key=thread_key, author=author)
             if pasted:
-                self.store.add_chat("rimuru", PASTED_KEY_NOTE, chat=thread_key, notice="safety")
+                self.store.add_chat("rimuru", note, chat=thread_key, notice="safety")
             return {"ok": True, "trigger_id": trigger.id, **warned}
         names, rest = picked
         found, missing = skillbook.resolve(self.config.skills_dir, names)
@@ -758,7 +762,7 @@ class RimuruSystem:
         trigger = await self.human_message(rest, channel=channel, thread_key=thread_key, author=author,
                                            skills=[s.name for s in found], said=text)
         if pasted:
-            self.store.add_chat("rimuru", PASTED_KEY_NOTE, chat=thread_key, notice="safety")
+            self.store.add_chat("rimuru", note, chat=thread_key, notice="safety")
         return {"ok": True, "trigger_id": trigger.id, "skills": [s.name for s in found], **warned}
 
     def _no_such_skill(self, missing: list[str]) -> str:
@@ -914,6 +918,8 @@ class RimuruSystem:
                 "streamed": bool(getattr(self.router.loop.client, "stream", False)),
             },
             "bash_enabled": self.config.enable_bash,
+            # Practice runs and other tools for people working on Rimuru itself.
+            "dev": bool(os.environ.get("RIMURU_DEV")),
             "shell": {"kind": self.shell.kind, "ready": self.shell.ready,
                       "detail": self.shell.describe()},
             "max_workers": self.config.max_workers,

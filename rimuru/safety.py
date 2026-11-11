@@ -316,6 +316,3 @@ REFUSED_HIDDEN = ("Refused, nothing was written: that has " + HIDDEN + " in it -
 REFUSED_SECRET = ("Refused: {name} holds secrets (keys, passwords), and clones never open such files. "
                   "If the job needs a key, write the code to read it from the environment, and tell "
                   "the person which name to set.")
-PASTED_KEY_NOTE = ("I hid what looked like a key or password in your message, so it does not reach "
-                   "the AI service - those can log what they are sent. Add keys with Models or "
-                   "Connections instead; the code can read them from there.")

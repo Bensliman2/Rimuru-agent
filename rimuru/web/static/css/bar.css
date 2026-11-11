@@ -68,7 +68,7 @@
 .bar-btn:hover { border-color: var(--accent); }
 .bar-btn:hover svg { color: var(--accent); }
 a.bar-btn { text-decoration: none; }
-/* Five labeled buttons need about 1000px. Below that they show their icons (each
+/* Six labeled buttons need about 1150px. Below that they show their icons (each
    keeps its name as a tooltip), never wrapping or pushing Stop off the bar. */
 .bar-btn, .stop { white-space: nowrap; flex-shrink: 0; }
 /* The bar's buttons stay in one place in the page; on a phone they fold into a menu
@@ -76,7 +76,7 @@ a.bar-btn { text-decoration: none; }
 .bar-menu { display: flex; align-items: center; gap: inherit; }
 .more-btn { display: none; }
 
-@media (max-width: 1080px) {
+@media (max-width: 1200px) {
   body:not(.hood-page) .bar-btn span { display: none; }
   body:not(.hood-page) .bar-btn { padding: 7px 9px; }
 }
@@ -131,4 +131,12 @@ a.bar-btn { text-decoration: none; }
   .bar { gap: 8px; padding: 10px 12px; }
   .brand .name { display: none; }
   .bar-btn { padding: 7px; }
+}
+
+/* The language picker: a bar button with the language's name; the list opens over it */
+.lang-pick { position: relative; }
+.lang-pick select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.lang-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 760px) {
+  [dir="rtl"] body:not(.hood-page) .bar-menu { right: auto; left: 12px; }
 }

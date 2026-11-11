@@ -32,6 +32,8 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8800:8800"
+      # What clones build opens here ("View it"), on a port of its own.
+      - "127.0.0.1:8820:8820"
       # Remote hands - another machine working for a session. Uncomment to let
       # other machines on your network connect (only with a pairing code):
       # - "8810:8810"

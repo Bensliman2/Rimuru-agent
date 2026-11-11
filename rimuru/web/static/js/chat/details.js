@@ -1,7 +1,7 @@
 /* Rimuru's chat page: details panel. */
 import { $, BADGE, DOING, api, esc, icon, isLive, post, slime } from "../shared.js";
 import { closeBarMenu } from "./bar.js";
-import { ago, clock, fmt, state } from "./base.js";
+import { ago, clock, fmt, state, viewUrl } from "./base.js";
 import { closeConnections } from "./connections.js";
 import { closeFolders } from "./folders.js";
 import { refresh } from "./main.js";
@@ -111,6 +111,8 @@ export async function loadPanel() {
       <div><b>Right now:</b> ${esc(DOING[c.stage] || c.activity)}${latest
         ? `<div class="now-last">Last step: ${esc(latest.lines[latest.lines.length - 1])}</div>` : ""}</div></div>`);
   }
+  if (viewUrl(state.chat, c.view)) parts.push(`<div class="section"><a class="view-link" href="${esc(viewUrl(state.chat, c.view))}"
+    target="_blank" rel="noopener">${icon("eye")}View what it made</a></div>`);
   if (c.result) parts.push(`<div class="section"><h3>What it reported</h3><div class="box">${fmt(c.result)}</div></div>`);
   if (c.files.length) parts.push(`<div class="section"><h3>Files it changed</h3>
     <div class="folder-line">${icon("folder")}<span>In <code>${esc(d.folder)}/</code></span>

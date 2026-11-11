@@ -261,3 +261,15 @@ a.event { text-decoration: none; }
   .folder-bar { padding: 8px 10px 8px 12px; gap: 8px; }
   .fb-path { display: none; }
 }
+
+/* What a clone built, to open (rimuru/web/viewer.py) */
+.view-link {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 6px 12px;
+  border-radius: 999px; font-size: 13px; font-weight: 650; text-decoration: none;
+  color: var(--accent-strong); background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.view-link:hover { border-color: var(--accent); }
+.view-link svg { width: 15px; height: 15px; }
+.bubble a { color: inherit; text-decoration: underline; overflow-wrap: anywhere; }
+a.ghost { text-decoration: none; display: inline-flex; align-items: center; }

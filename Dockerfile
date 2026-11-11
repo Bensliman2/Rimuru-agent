@@ -21,8 +21,8 @@ RUN apt-get update \
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+COPY requirements.txt requirements.lock ./
+RUN pip install -r requirements.lock
 COPY . .
 RUN chmod +x docker-entrypoint.sh
 
@@ -35,12 +35,12 @@ ENV RIMURU_BIND=0.0.0.0 \
     RIMURU_ENV_FILE=/rimuru/data/.env \
     RIMURU_MODELS=/rimuru/data/models.toml \
     RIMURU_SKILLS=/rimuru/skills
-EXPOSE 8800 8810
+EXPOSE 8800 8810 8820
 
 # Runs as you, not as root: see docker-entrypoint.sh.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8800/api/overview', timeout=4)"
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8800/api/health', timeout=4)"
 
 CMD ["python", "run.py", "--speed", "1", "--data", "/rimuru/data"]

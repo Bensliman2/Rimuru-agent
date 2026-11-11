@@ -13,6 +13,7 @@ import "./memory.js";
 import "./practice.js";
 import "./transcripts.js";
 import "./clicks.js";
+import { startTranslating } from "../i18n.js";
 
 export async function refresh() {
   try {
@@ -58,3 +59,4 @@ refresh();
 setInterval(() => { if (state.dirty && !document.hidden) { state.dirty = false; refresh(); } }, 2000);
 setInterval(() => { if (!document.hidden) refresh(); }, 15000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+startTranslating();

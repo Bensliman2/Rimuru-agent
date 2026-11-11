@@ -701,6 +701,12 @@ a.msg-where:hover { color: var(--accent-strong); text-decoration: underline; }
   .scroll, .col-wide .scroll { max-height: 70vh; }
 }
 
+/* Four labeled buttons need about 840px in French: icons only below 900px. */
+@media (max-width: 900px) {
+  .hood-page .bar-btn span { display: none; }
+  .hood-page .bar-btn { padding: 7px 9px; }
+}
+
 @media (max-width: 760px) {
   .flow { flex-direction: column; }
   .flow-arrow { transform: rotate(90deg); }

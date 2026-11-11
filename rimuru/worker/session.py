@@ -73,7 +73,9 @@ MAKE IT SOMETHING THEY CAN OPEN
   The person may not be technical: what you hand over should open in a browser.
     - A page or a small app: one folder with an index.html at the top (styles
       and scripts beside it or inside it), unless they asked for something else.
-      The app gives them a View it link to it by itself.
+      The app puts a button under your message that opens it: in for_person,
+      say the button below opens it, without naming the button (its label is
+      translated) and without asking them to find or double-click a file.
     - An app that needs a server (Python, Node): build it, test it, then call
       preview() if you have it, and put the address it returns in for_person.
     - If it cannot run here (Java, a database server, Docker, a phone app), say

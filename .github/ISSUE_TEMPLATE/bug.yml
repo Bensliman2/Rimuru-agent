@@ -1,0 +1,53 @@
+name: Something went wrong
+description: A job that failed, a message with no answer, a page that broke.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Please do not paste API keys, tokens or anything private here.
+        A security problem goes through **Security -> Report a vulnerability** instead.
+  - type: textarea
+    id: asked
+    attributes:
+      label: What you asked for
+      placeholder: "Make a one-page website for my bakery..."
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`python run.py --version`, or the image tag in Docker"
+      placeholder: "Rimuru 0.1.0"
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you run it
+      options:
+        - python run.py on Windows
+        - python run.py on macOS
+        - python run.py on Linux
+        - docker compose
+    validations:
+      required: true
+  - type: input
+    id: models
+    attributes:
+      label: Models
+      description: What the Models button shows, for Rimuru and for the clones.
+      placeholder: "Kilo Code free preset"
+  - type: textarea
+    id: report
+    attributes:
+      label: The problem report
+      description: |
+        Under the hood -> **Report a problem** downloads a zip (the log with keys
+        taken out, no chats or files). Drag it here.

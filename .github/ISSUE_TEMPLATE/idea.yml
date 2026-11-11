@@ -1,0 +1,16 @@
+name: An idea
+description: Something Rimuru should do, or do differently.
+labels: [idea]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: What you would like to do
+      description: In your own words, as you would ask Rimuru. Who is it for?
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today
+      description: What you tried, and where it fell short.

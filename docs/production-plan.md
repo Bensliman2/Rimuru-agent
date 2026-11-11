@@ -120,9 +120,9 @@ end with something that opens (9 pages, 1 Flask preview), about 40 s and 5 AI re
 1. **View it.** A link in the clone's final message and on its card opens what was built.
    Pages are served from their own address, so a built page can never touch the app's own
    controls. No secret files, no escaping the folder. Plus "Download as zip".
-2. **Run it.** A `preview` tool for clones starts the project's server in a sealed preview
-   container (no internet, reachable only from this computer) and returns a link. Python
-   and Node first. It stops by itself after 30 idle minutes.
+2. **Run it.** A `preview` tool for clones starts the project's server in a preview
+   container (only its own folder, reachable only from this computer; it may reach the internet) and returns a link. Python
+   and Node first. It stops by itself after an hour.
 3. **Clones aim for things that open.** Self-contained pages unless asked otherwise.
    Always end with how to see it. Check it loads before finishing.
 4. **Plain limits.** When something cannot run here (Java, a database), one honest
@@ -164,7 +164,12 @@ all data.
 
 ### Phase 3: launch and listen (2 to 3 days of work, then two weeks)
 
-Status: not started. Needs the owner's decision on open source and on the name.
+Status: the launch kit is done (2026-11-11): README for strangers with screenshots and an
+honest comparison with DeepSeek's prototype, CHANGELOG, CONTRIBUTING, issue forms, a "Report a
+problem" link, a 57-second explainer video and a LinkedIn draft (`data/launch-kit/`, not
+tracked). Making it public, tagging `v0.1.0` and posting are the owner's. The name is still
+the owner's call. While recording, a real bug turned up and was fixed: Rimuru answered French
+and Arabic messages in English.
 
 1. Make the repository public, publish the release, post the launch. Drafts by Claude,
    posted by the owner.

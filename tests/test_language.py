@@ -300,6 +300,31 @@ def test_a_failing_service_is_told_in_arabic(tmp_path):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("said, told", [
+    ("Crée une page web pour mon café « Le Petit Matin »", "reply to them in French"),
+    ("اصنع صفحة ويب لمحل ورد اسمه ياسمين", "reply to them in Arabic"),
+    ("Make a one-page website for my bakery called Sweet Crumbs", "reply to them in English"),
+    ("Hazme una página web para mi panadería", "in the language their message is written in"),
+])
+def test_rimuru_is_told_which_language_to_answer_in(tmp_path, said, told):
+    # A free model answered French and Arabic in English until it was told on the
+    # message itself - and English in French when only the instructions named French.
+    async def run():
+        system = make_system(tmp_path)
+        await system.person_says(said, thread_key="s-lang0003")
+        waiting = [q["text"] for q in system.router.loop._queued]
+        assert any(said in t and told in t for t in waiting), waiting
+        system.store.close()
+
+    asyncio.run(run())
+
+
+def test_the_instructions_name_no_language_to_copy():
+    from rimuru.router.session import SYSTEM_PROMPT
+
+    assert "French" not in SYSTEM_PROMPT and "Arabic" not in SYSTEM_PROMPT
+
+
 def test_a_pasted_key_is_explained_in_french(tmp_path):
     async def run():
         system = make_system(tmp_path)

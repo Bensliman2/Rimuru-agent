@@ -1,8 +1,19 @@
 # Rimuru
 
-Chat with one assistant. Behind the scenes it splits into **clones** that work on
-your requests in parallel - writing code, running it in a sealed sandbox, checking
-their own tests - and reports back in plain language.
+**An AI assistant you run on your own computer. You ask in plain words; it builds the
+thing and gives you a button that opens it.**
+
+You chat with one assistant. It hands each job to a *clone* that writes the code, runs
+whatever it needs in a sealed sandbox, and tells you, in your language, what you now
+have. Free models work with no account. Open source under the MIT licence.
+
+![A finished job in the chat: the request, Rimuru's answer, and the clone's message with its View it button](docs/media/chat.png)
+
+| You ask | You get |
+|---|---|
+| "Make a one-page website for my bakery called Sweet Crumbs, with our opening hours and our three best cakes." | A page that opens from **View it**, about a minute later on a free model ([this one](docs/media/built-page.jpg)) |
+| « Crée une page web pour mon café… » or «اصنع صفحة ويب لمحل ورد…» | The same, answered in French or Arabic, with the whole app in that language ([Arabic](docs/media/arabic.png)) |
+| "Build a tiny Flask app that shows today's date" | The app running in a preview container that sees only its own folder, with a link to it |
 
 It is a working implementation of the **Super-agent** architecture from the DeepSeek
 Harness team's article [*Exploring Super-agent Design: Towards a More Autonomous Agent
@@ -12,7 +23,12 @@ watchdog keeping them honest.
 
 ## Start
 
+You need Python 3.12 (or only Docker, below). Start **Docker Desktop** first if clones
+should run code.
+
 ```bash
+git clone https://github.com/Bensliman2/Rimuru-agent.git
+cd Rimuru-agent
 pip install -r requirements.txt
 python run.py
 ```
@@ -23,23 +39,34 @@ Then open **http://127.0.0.1:8800**.
   account), a key you paste, or Ollama on your computer. It tries what you pick with
   one small request and keeps it only if it answered, so setup takes about two minutes.
 - **Your models.** Later, click **Models** to choose which AI does each job:
-  Rimuru itself, the clones, the watchdog and the noise filter. Kimi, Claude, OpenAI,
-  DeepSeek, Ollama (on your own computer) and any OpenAI-compatible server work. Paste
-  a key and **Find models** lists what it can use. Nothing about models is fixed in
-  the code: the choice is saved in `config/models.toml`, which you can also edit by
-  hand (`config/models.example.toml` shows every option). Keys are kept in `.env` on
-  your computer and never shown again. To look around first, pick the **demo** on that
-  first screen: it shows how everything moves, and says plainly that nothing real was
-  built.
+  Rimuru itself, the clones, the watchdog, the noise filter, and a backup model that
+  takes over when one keeps failing. Kimi, Claude, OpenAI, DeepSeek, Ollama (on your
+  own computer) and any OpenAI-compatible server work. Paste a key and **Find models**
+  lists what it can use. Nothing about models is fixed in the code: the choice is saved
+  in `config/models.toml`, which you can also edit by hand (`config/models.example.toml`
+  shows every option). Keys are kept in `.env` on your computer and never shown again.
+  To look around first, pick the **demo** on that first screen: it shows how everything
+  moves, and says plainly that nothing real was built.
 - **Free models.** No account at all: **Kilo Code** serves free models with no key
   (about 200 requests an hour). Free keys from Groq, Google Gemini, Mistral,
   OpenRouter, NVIDIA, Z AI and Cohere are one paste away in **Models** (from the list
   at [awesome-free-llm-apis](https://github.com/mnfst/awesome-free-llm-apis)). Free
   tiers may log what you send - nothing confidential.
-- **Running code.** Start **Docker Desktop** before Rimuru and clones can run what
-  they write - tests, scripts - inside a sandbox (below). The sandbox image builds by
-  itself the first time (about a minute). Without Docker, clones can still read and
-  write files but cannot run anything, and they say so.
+- **Running code.** With Docker running, clones run what they write - tests, scripts,
+  a small server - inside a sandbox (below). The sandbox image builds by itself the
+  first time (about a minute). Without Docker, clones can still read and write files
+  but cannot run anything, and they say so.
+
+### Your first job
+
+1. Type what you want, in your own words: *Make a one-page website for my bakery called
+   Sweet Crumbs, with our opening hours and our three best cakes.*
+2. Rimuru answers and a clone starts on it: you see it on the right, under **Clones at
+   work**, with its name and what it is doing.
+3. When it is done, the clone writes to you, with a **View it** button that opens what it
+   made. **Download**, above the chat, gives you the files as a zip.
+4. Ask for changes in the same session ("make the cakes section bigger"): the same clone
+   picks it up and remembers the work.
 
 ### Or in Docker
 
@@ -65,6 +92,51 @@ app and the clones run as whoever owns this folder, not as root, so on Linux the
 those folders are yours (`PUID` and `PGID`, in a `.env` next to the compose file, choose
 someone else).
 
+### From your phone
+
+The simplest way is Telegram (below). To open the app itself from a phone, give it a
+password and reach it over a private network, never an open port. In `.env`:
+
+```bash
+RIMURU_PASSWORD=a-long-password-of-your-own
+RIMURU_HOST=0.0.0.0
+```
+
+Then install [Tailscale](https://tailscale.com) on the computer and the phone, and open
+`http://<your computer's Tailscale name>:8800`. Every page, the live feed and what
+clones build ask for the password once; ten wrong tries lock that address out for a
+while. Without a password, Rimuru answers this computer only.
+
+### Your data
+
+```bash
+python run.py export            # a zip of every chat, job and session folder (no API keys)
+python run.py import FILE.zip   # bring it back, on this computer or another one
+python run.py wipe              # delete everything, after you type "delete everything"
+```
+
+Before an upgrade changes the database, Rimuru copies it next to itself first.
+**Under the hood -> Report a problem** downloads the log with keys taken out, the
+version and the state of things, for a bug report: no chats, no files.
+
+## How it compares
+
+DeepSeek published its own prototype of this design,
+[deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype)
+(MIT). Both follow the same article. As of 2026-11-11, from its README and deployment
+guide:
+
+| | Rimuru | DeepSeek's prototype |
+|---|---|---|
+| Made for | one person, technical or not, in a browser or on Telegram | a team coding on one GitHub repository |
+| Setup | `python run.py` or `docker compose up -d`, then a first screen picks a model | DeepSeek Harness, then several setup steps |
+| Where commands run | a throwaway container per command: no internet, only the job's folder | as the operator's OS user, "danger-full-access" |
+| Maturity | new | the official reference, widely followed |
+
+If your team lives in one GitHub repository and already uses DeepSeek Harness, start
+with theirs. If you want an assistant for yourself that builds things you can open,
+with any model (free ones included) and a sealed sandbox, that is what Rimuru is for.
+
 ## Using it
 
 - **Type what you need** in the chat. Rimuru answers in plain words and tells you
@@ -75,6 +147,14 @@ someone else).
   Made the changes, Tested it, Reported back*) where a small slime shows what the clone
   is doing right now, then what it was asked, its result, the files it changed and
   every step in plain sentences, with the raw technical detail folded away.
+- **Open what was built.** A page opens from **View it** in the clone's message, on a
+  port of its own (8820) so a built page can never reach the app. An app with a server
+  runs in a preview container that sees only its folder and answers only this computer,
+  and the clone gives you its link. **Download**
+  above the chat gives the session's files as a zip.
+- **Your language.** The globe button shows the app in English, French or Arabic (right
+  to left), or follows your browser. Rimuru and its clones answer in the language you
+  write in.
 - **Add details any time.** Say "also make it do X" while a clone is working and
   Rimuru passes it to the right clone.
 - **Stop** stops everything in progress. A single job can be stopped from its details.
@@ -221,7 +301,7 @@ the same plain language as the chat - one view at a time:
 | Watchdog | its checks and interventions, and its notes - a quiet supervisor |
 | Messages | every message that came in - your chat, Telegram, GitHub, practice runs - and what became of it, kept across restarts; and the rules for group chats, editable in plain words |
 | Memory | find anything by typing a word or two - a session, a job, a message - and everything Rimuru remembers, to change or forget; and how long old jobs keep every detail |
-| Practice runs | scripted workloads - a busy team chat, a burst, a quiet day, two coding exercises |
+| Practice runs | scripted workloads - a busy team chat, a burst, a quiet day, two coding exercises (shown with `RIMURU_DEV=1`) |
 
 Five modules, each a section of the article:
 
@@ -233,10 +313,17 @@ Five modules, each a section of the article:
 | s3.2 | `router/routing.py` | **Pass-through** - in group channels a worker follows its thread, so follow-ups reach it directly. In the one-to-one chat the Router owns the conversation and relays follow-ups itself. |
 | s3.3 | `context.py`, `recall.py` | **Inline & Spill** and **Chain of Recall** - everything has an ID; whatever is trimmed from a context window stays reachable. |
 | s4.1 | `agent/loop.py` | **Async loop** - `start()` returns at once and results arrive as events, so nothing blocks; events that pile up are merged into one turn. A person's message cuts in on a turn that something else started. |
-| s5.1 | `store.py`, `system.py` | **State outside the loop** - every record is in SQLite and reloaded on start: chat, jobs, transcripts, notes. A job cut off by a restart is resumed once, with a note of what it had already done. |
+| s5.1 | `store.py`, `system.py` | **State outside the loop** - every record is in SQLite and reloaded on start: chat, jobs, transcripts, notes, waiting messages. A job cut off by a restart resumes where it stopped, up to 3 times. |
 | s6 | `watchdog/session.py` | **Watchdog** - checks that clones make *progress*, not just that they are alive, and nudges the ones going nowhere. Idle costs nothing. |
 
 ## Proven on a real model
+
+**Golden jobs, on free models.** Ten everyday requests - a to-do list, a tip calculator,
+a bakery site, a quiz, a page in French, a page in Arabic, a small Flask app - run for
+real on Kilo Code's free models with the Docker sandbox, and graded by code: does what
+was built open? **10 of 10** did, in about 40 seconds and 5 AI requests each (November
+2026). Run them on your own models with `python run.py golden`. In English, French and
+Arabic, Rimuru and the clone both answered in the person's language.
 
 Kimi, November 2026 - Router on `kimi-k3.1-pro-highspeed`, clones on `kimi-k3.1-pro`.
 Every result is judged by tests the agent could not see or change, never by what it
@@ -297,7 +384,13 @@ python run.py eval run                    # the end-to-end evaluation (docs/eval
 python run.py speed probe                 # how fast each of your models writes
 python run.py speed run --label NAME      # three everyday requests, timed and checked (docs/speed.md)
 python run.py scale                       # restart time, memory and page refresh, up to 5,000 jobs
+python run.py golden --url http://127.0.0.1:8800   # ten everyday jobs, run for real and graded
+python run.py --version
 ```
+
+How the code fits together, and why it is the way it is: [CLAUDE.md](CLAUDE.md). How to
+help: [CONTRIBUTING.md](CONTRIBUTING.md). What protects you, and how to report a security
+problem: [SECURITY.md](SECURITY.md). What changed: [CHANGELOG.md](CHANGELOG.md).
 
 `scenarios/` holds the simulated workloads, a small repo with real bugs, and the hidden
 acceptance tests; Under the hood replays the workloads as practice runs. Models are
@@ -333,9 +426,15 @@ What each of the old limits is now, and what is still true:
   only true for a while stays until it is changed or forgotten.
 - **Python packages must have ready-made versions (wheels);** nothing is built from
   source when a clone installs one.
-- **The app's own words are in English:** the buttons, `/status`, the Telegram welcome.
-  Rimuru and its clones answer in your language, and names, memory and safety checks
-  work in any language - with extra care for French and Arabic.
+- **The app's own words are in English, French and Arabic.** Other languages see
+  English buttons, though Rimuru and its clones answer in any language, and names,
+  memory and safety checks work in any script. `/status` answers in English.
+- **Free models are slow and uneven.** A first answer can take 20 seconds, and a job's
+  title can come out with words from two languages. A paid model is faster and steadier;
+  the backup model in **Models** covers a free one that stops answering.
+- **One person per Rimuru.** There are no accounts: the optional password protects the
+  whole app, for you. Reaching it from a phone over a private network was checked on
+  one computer, not yet from a real phone.
 - **A free service's limit is known only for Kilo:** at 80% of its hourly requests Rimuru
   says so in the chat. When any free limit runs out, the work waits and carries on by
   itself, without saying why.
@@ -375,8 +474,13 @@ data/            your own data, never committed:
   deps/            packages clones installed, one set per work folder
 skills/          your skills, one Markdown file each - yours, not committed (see its README)
 sandbox/         the container image clones run code in
-docs/            evaluation.md - the end-to-end evaluation and what to fix
+docs/            evaluation.md, speed.md, production-plan.md; media/ for this page
 scenarios/       test workloads, a demo repo with real bugs, hidden acceptance tests
-tests/           280 automated checks
+tests/           automated checks (python -m pytest)
 run.py           serve | bench | verify | trace | eval | speed | scale | hands
 ```
+
+## Licence
+
+MIT - see [LICENSE](LICENSE). The article's design belongs to its authors; this is an
+independent implementation.

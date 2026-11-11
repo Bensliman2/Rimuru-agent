@@ -19,9 +19,11 @@ paying for them in its context window.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from ..context import inline_trigger
+from ..i18n import language_of
 from ..ids import ROUTER_SESSION_ID
 from ..models import R_PASSTHROUGH, R_ROUTER, V_ACCEPTED, V_DROPPED_FAST, Trigger
 from ..safety import hidden_instructions
@@ -29,6 +31,24 @@ from ..sessions import UNNAMED
 
 InjectRouter = Callable[[str, str | None], None]
 InjectWorker = Callable[[str, str, str | None], bool]
+
+
+LANGUAGE_NAMES = {"fr": "French", "ar": "Arabic", "en": "English"}
+_ENGLISH = set("""the a an and or of to in for with my our your is are be it this that on at by from i you
+we they me us please make build create can could would want need add fix help write show how what""".split())
+
+
+def language_line(text: str) -> str:
+    """Which language Rimuru answers in, said on the message itself. A free model
+    answered French and Arabic in English until it was told there - and English in
+    French once the instructions named French as an example."""
+    lang = language_of(text)
+    if lang == "en":
+        words = re.findall(r"[a-z']+", (text or "").lower())
+        if not words or sum(w in _ENGLISH for w in words) / len(words) < 0.2:
+            return "\nReply to the person in the language their message is written in."
+    name = LANGUAGE_NAMES[lang]
+    return f"\nThe person wrote in {name}: reply to them in {name}, and write the job's title in {name}."
 
 
 class EventRouter:
@@ -134,6 +154,8 @@ class EventRouter:
             f"Unassigned event admitted by the filter ({reason}):\n\n{rendered}\n\n"
             f"Decide what to do with it. Dispatch work, reply, or ignore it."
         )
+        if direct:
+            text += language_line(trigger.content)
         self._inject_router(text, trigger.id)
 
         trigger.route = R_ROUTER

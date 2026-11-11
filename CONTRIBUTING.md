@@ -58,4 +58,4 @@ A few rules the code depends on:
 - New text on the pages gets its French and Arabic lines in `static/js/i18n.js`.
 - Say what you checked by hand, in a browser or with a real model.
 - By sending a pull request you agree that your work is shared under the
-  [MIT licence](LICENSE).
+  [GNU AGPL-3.0](LICENSE), the project's licence.

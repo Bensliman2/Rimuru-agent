@@ -5,7 +5,7 @@ thing and gives you a button that opens it.**
 
 You chat with one assistant. It hands each job to a *clone* that writes the code, runs
 whatever it needs in a sealed sandbox, and tells you, in your language, what you now
-have. Free models work with no account. Open source under the MIT licence.
+have. Free models work with no account. Free software under the GNU AGPL-3.0.
 
 ![A finished job in the chat: the request, Rimuru's answer, and the clone's message with its View it button](docs/media/chat.png)
 
@@ -482,5 +482,14 @@ run.py           serve | bench | verify | trace | eval | speed | scale | hands
 
 ## Licence
 
-MIT - see [LICENSE](LICENSE). The article's design belongs to its authors; this is an
-independent implementation.
+Copyright (C) 2026 Hamza Bensliman and Anas Dadi.
+
+Rimuru is free software under the [GNU Affero General Public License, version 3](LICENSE)
+(`AGPL-3.0-only`). In plain words: you may use it, study it, change it and share it. If
+you share a changed version, or let other people use a changed version over a network,
+you must offer them its full source code under the same licence. It comes with no
+warranty.
+
+The article's design belongs to its authors; this is an independent implementation. The
+libraries it uses keep their own licences (MIT, BSD, Apache-2.0, MPL-2.0 and the PSF
+licence, all compatible with the AGPL).

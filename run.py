@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# Copyright (C) 2026 Hamza Bensliman and Anas Dadi
+# SPDX-License-Identifier: AGPL-3.0-only (see LICENSE)
 """Rimuru entrypoint.
 
     python run.py                                  dashboard on http://127.0.0.1:8800

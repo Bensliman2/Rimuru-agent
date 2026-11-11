@@ -5,7 +5,8 @@ before 1.0, a minor version may change how things work, and this page says how.
 
 ## [0.1.0] - 2026-11-11
 
-The first public version.
+The first public version, free software under the GNU AGPL-3.0
+(Copyright (C) 2026 Hamza Bensliman and Anas Dadi).
 
 ### What you can do
 

@@ -213,7 +213,8 @@ remote hands. Every hour goes to phases 0 to 2.
 - Pick an original name. The current name and the slime mascot come from an anime that
   someone else owns. That is fine for a personal project and a risk for a public one.
   This is not legal advice; the safe move is a new name before any launch.
-- Choose a licence (MIT is the simple choice; it matches DeepSeek's).
+- Choose a licence. Done: GNU AGPL-3.0-only, Copyright (C) 2026 Hamza Bensliman and
+  Anas Dadi (2026-11-12).
 - A paid key for a cheap model, for the golden jobs. A few dollars.
 - Post the launch and recruit the first testers.
 - Later, for phase 4: a domain, a small Linux server, a payment account.

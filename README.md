@@ -199,6 +199,15 @@ with any model (free ones included) and a sealed sandbox, that is what Rimuru is
   the top counts this hour's requests, and Rimuru says so in the chat when you are close.
   **Models** has a ready-made free setup: a quick model for Rimuru, a stronger one for
   the clones, in one click.
+- **Clones share what they find, and never contradict each other unseen.** Each
+  session has a notebook: when a clone finds something the others would need - the
+  cause of a bug, how a part works, a fact it checked - it writes it there, with how it
+  knows. Clones working at the same time hear of it, and later ones read it before they
+  start. A clone cannot write about something another one already covered without
+  saying whether it agrees, disagrees or settles it, and settling needs proof from a
+  check (a test, a command), not an opinion. A disagreement still open when the work is
+  done is not smoothed over: the clone keeps both sides in its last words, and Rimuru
+  tells you what is not sure yet.
 - **Every clone has a name, a persona and a color** - Mika the amber one, Dax the mint
   one - and the clones working side by side never share a color.
 - **Rimuru remembers.** It keeps lasting facts by itself - about you, about each
@@ -314,6 +323,7 @@ Five modules, each a section of the article:
 | s3.3 | `context.py`, `recall.py` | **Inline & Spill** and **Chain of Recall** - everything has an ID; whatever is trimmed from a context window stays reachable. |
 | s4.1 | `agent/loop.py` | **Async loop** - `start()` returns at once and results arrive as events, so nothing blocks; events that pile up are merged into one turn. A person's message cuts in on a turn that something else started. |
 | s5.1 | `store.py`, `system.py` | **State outside the loop** - every record is in SQLite and reloaded on start: chat, jobs, transcripts, notes, waiting messages. A job cut off by a restart resumes where it stopped, up to 3 times. |
+| s3.2 | `notebook.py` | **Session notebook** - what clones in a session found out, with how they know it, shared with the others; a contradiction is never silent, settling one needs a check, and an open one stays in the final report. |
 | s6 | `watchdog/session.py` | **Watchdog** - checks that clones make *progress*, not just that they are alive, and nudges the ones going nowhere. Idle costs nothing. |
 
 ## Proven on a real model
@@ -435,6 +445,9 @@ What each of the old limits is now, and what is still true:
 - **One person per Rimuru.** There are no accounts: the optional password protects the
   whole app, for you. Reaching it from a phone over a private network was checked on
   one computer, not yet from a real phone.
+- **The notebook relies on clones using it.** A clone writes a finding only when it
+  judges it useful, and two findings about the same thing are matched by their words;
+  a contradiction between findings about differently named subjects is not caught.
 - **A free service's limit is known only for Kilo:** at 80% of its hourly requests Rimuru
   says so in the chat. When any free limit runs out, the work waits and carries on by
   itself, without saying why.
@@ -457,6 +470,7 @@ rimuru/
   recall.py      Chain of Recall
   store.py       durable state: chat history, saved conversations, memories
   memory.py      long-term memory: what is kept, and what comes back when
+  notebook.py    the session notebook: clones' findings, shared; disagreements kept, not hidden
   safety.py      finding hidden instructions aimed at AI tools, keeping keys in
   text.py        finding and comparing words, in any language
   logs.py        data/rimuru.log: what went wrong quietly, keys taken out

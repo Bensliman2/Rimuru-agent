@@ -18,6 +18,7 @@ PREFIXES = {
     "step": "stp",
     "job": "job",
     "memory": "mem",
+    "finding": "fnd",
 }
 
 KIND_BY_PREFIX = {v: k for k, v in PREFIXES.items()}

@@ -29,7 +29,7 @@ from ..agent.tools import ToolRegistry, b, enum, obj, register_recall, s
 from ..ids import new_id
 from ..sessions import display
 from ..models import Job, Session, Task
-from .. import persona
+from .. import notebook, persona
 from .. import skills as skillbook
 from ..safety import (HIDDEN, REFUSED_HIDDEN, REFUSED_SECRET, hidden_instructions, secret_file,
                       warning_for_model)
@@ -134,6 +134,22 @@ WORK FAST: A FIRST VERSION FIRST
     you left out, so the person can ask for them.
 """
 
+NOTEBOOK_NOTE = """
+THE SESSION NOTEBOOK
+  Other clones may work in this session, now or later. What you find out that
+  they would need - the cause of a bug, how something works, a decision, a fact
+  you checked - goes in the notebook with note_finding: a short subject (the
+  file, function or question it is about), the claim, and how you know it. One
+  fact per call, only what matters, not routine steps.
+  If another clone already wrote about that subject, say whether yours confirms,
+  contradicts or settles it. Never contradict it silently: a disagreement is
+  useful, a hidden one is not. Settle one only with evidence from a check (a
+  test, a command, the code), never with an opinion. If one involving you is
+  still open when you finish, keep both sides in your summary, and say in
+  for_person, in one plain sentence, what is not sure yet.
+  New findings from other clones reach you as notes; read_notebook shows it all.
+"""
+
 SPECULATIVE_NOTE = """
 THIS TASK IS SPECULATIVE
   Nobody asked you for this. You are acting ahead on a signal in the
@@ -171,8 +187,14 @@ class WorkerAgent:
         skills: list[Any] | None = None,
         forced: list[Any] | None = None,
         continues: bool = False,
+        notebook_text: str = "",
+        on_finding: Any = None,
     ) -> None:
         self.task = task
+        # Its session's notebook (rimuru/notebook.py): the thread its job came from.
+        self.scope = task.thread_id or ""
+        self.on_finding = on_finding
+        self._told_disagreements = False
         # Skills the person forced for this job (/skill_<name>): in full, in the brief.
         self.forced = list(forced or [])
         # The person's skills, as they stood when this clone began: the brief
@@ -213,6 +235,7 @@ class WorkerAgent:
             + {"docker": SANDBOX_NOTE, "host": HOST_NOTE}.get(
                 getattr(shell, "kind", "simulated"), NO_SHELL_NOTE)
             + QUICK_NOTE
+            + (NOTEBOOK_NOTE if self.scope else "")
             + (SPECULATIVE_NOTE if speculative else "")
         )
         self.loop = AgentLoop(
@@ -276,6 +299,8 @@ class WorkerAgent:
             brief += skillbook.for_brief(others)
         if handoff:
             brief += handoff
+        if notebook_text:
+            brief += notebook_text
         if memories:
             brief += memories.rstrip() + "\n\n"
         if resume_note:
@@ -356,6 +381,29 @@ class WorkerAgent:
             ),
             self._tool_finish,
         )
+
+        if self.scope:
+            reg.add(
+                "note_finding",
+                "Write one thing you found out in this session's notebook, for the other clones: "
+                "the cause of a bug, how something works, a decision, a fact you checked. If another "
+                "clone already wrote about the subject, say whether yours confirms, contradicts or "
+                "settles it (settling needs evidence from a check).",
+                obj(subject=s("What it is about, in a few words: a file, a function, a question"),
+                    claim=s("What you found, in a sentence or two"),
+                    evidence=s("How you know: the test, the command or the code that shows it. "
+                               "Leave it empty if you did not check", optional=True),
+                    relation=enum("How it relates to what is already there",
+                                  list(notebook.RELATIONS)),
+                    other=s("The finding (fnd_...) it confirms, contradicts or settles", optional=True)),
+                self._tool_note_finding,
+            )
+            reg.add(
+                "read_notebook",
+                "Read this session's whole notebook: every open finding, and the open disagreements.",
+                obj(),
+                self._tool_read_notebook,
+            )
 
         reg.add(
             "unsubscribe",
@@ -576,9 +624,35 @@ class WorkerAgent:
         summary = self._real_paths(str(args.get("summary") or "").strip())
         outcome = str(args.get("outcome") or "done")
         for_person = self._real_paths(str(args.get("for_person") or "").strip())
+        pairs = notebook.disagreements(self.store, self.scope, worker_id=self.session.id) if self.scope else []
+        if pairs and outcome in {"done", "failed"} and not self._told_disagreements:
+            # Once: the last words must not flatten a disagreement away.
+            self._told_disagreements = True
+            return ("Not finished yet. The notebook has an open disagreement involving your findings:\n"
+                    + notebook.pair_lines(self.store, pairs)
+                    + "\nSettle it with a check if you can (note_finding with relation=settles and the "
+                    "evidence). Otherwise keep both sides in summary"
+                    + (" and say in for_person, in one plain sentence, what is not sure yet"
+                       if self.finish_note() else "")
+                    + ". Then call finish() again.")
         await self.on_finish(self, outcome, summary, for_person)
         loop.request_stop(status="done")
         return f"Task closed as {outcome}."
+
+    async def _tool_note_finding(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        finding, said, target = notebook.add(
+            self.store, scope=self.scope, worker_id=self.session.id, task_id=self.task.id,
+            subject=self._real_paths(str(args.get("subject") or "")),
+            claim=self._real_paths(str(args.get("claim") or "")),
+            evidence=self._real_paths(str(args.get("evidence") or "")),
+            relation=str(args.get("relation") or "new"), other=str(args.get("other") or ""))
+        if finding is not None and self.on_finding is not None:
+            await self.on_finding(self, finding, target)
+        return said
+
+    async def _tool_read_notebook(self, args: dict[str, Any], loop: AgentLoop) -> str:
+        return (notebook.for_brief(self.store, self.scope, everything=True).strip()
+                or "The notebook is empty: no clone in this session has noted anything yet.")
 
     async def _tool_unsubscribe(self, args: dict[str, Any], loop: AgentLoop) -> str:
         thread_id = str(args.get("thread_id") or "").strip()

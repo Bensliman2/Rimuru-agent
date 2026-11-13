@@ -16,7 +16,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from .. import commands, memory, persona
+from .. import commands, memory, notebook, persona
 from .. import skills as skillbook
 from ..context import inline_trigger
 from ..ids import new_id
@@ -166,6 +166,7 @@ class WorkerPool:
             restore = self._closed_conversation(continue_from)
             self.store.drop_context(continue_from.id)       # one follow-up carries it on
             resume_note = FOLLOW_UP.format(id=task.id, title=task.title, brief=task.brief)
+            resume_note += notebook.for_brief(self.store, task.thread_id or "")
             if task.skills:
                 resume_note += skillbook.for_forced(skillbook.resolve(self.config.skills_dir, task.skills)[0])
         if restore is None:
@@ -198,6 +199,8 @@ class WorkerPool:
             guide=guide,
             handoff=handoff,
             continues=continue_from is not None,
+            notebook_text=notebook.for_brief(self.store, task.thread_id or "") if restore is None else "",
+            on_finding=self._on_finding,
             skills=skillbook.load_all(self.config.skills_dir),
             forced=skillbook.resolve(self.config.skills_dir, task.skills)[0] if task.skills else [],
         )
@@ -287,6 +290,32 @@ class WorkerPool:
                 f"Decide whether anyone needs to hear this. Routine progress "
                 f"needs no reply.",
             )
+
+    async def _on_finding(self, worker: WorkerAgent, finding: Any, target: Any) -> None:
+        """A clone wrote in its session's notebook: the other clones at work there
+        hear of it with their next turn, and Rimuru hears of a disagreement."""
+        self.bus.emit("notebook.finding", session_id=worker.session.id, task_id=worker.task.id,
+                      finding=finding.to_dict())
+        text = notebook.line(self.store, finding).strip()
+        for other in self.workers.values():
+            if other is worker or other.scope != finding.scope or other.loop.stopped \
+                    or other.session.status in TERMINAL:
+                continue
+            note = f"New in the session notebook: {text}"
+            if finding.relation == "contradicts" and target is not None and target.worker_id == other.session.id:
+                note += ("\nThis CONTRADICTS your finding [" + target.id + "]. Check it: settle it with "
+                         "evidence (note_finding, relation=settles) if you can, or keep both sides when you finish.")
+            other.loop.note(note)
+        if self.router is not None and finding.relation in {"contradicts", "settles"}:
+            if finding.relation == "contradicts" and target is not None:
+                self.bus.emit("notebook.disagreement", scope=finding.scope, finding=finding.id, other=target.id)
+                self.router.loop.note(
+                    f"Clones disagree on thread {finding.scope}, about {finding.subject}:\n"
+                    + notebook.pair_lines(self.store, [(target, finding)])
+                    + "\nThey are checking it. If it is still open when the work is reported, give the "
+                    "person both sides; do not pick one by guessing.")
+            else:
+                self.router.loop.note(f"Settled on thread {finding.scope}: {text}")
 
     # ------------------------------------------------------------------ #
     # follow-ups: the clone that just finished carries on
@@ -382,6 +411,9 @@ class WorkerPool:
             )
             return
 
+        pairs = notebook.disagreements(self.store, task.thread_id or "", worker_id=worker.session.id)
+        still_open = ("\n" + notebook.for_router(self.store, pairs)) if pairs else ""
+
         if self.router and outcome in {"done", "failed"} and for_person and in_chat and not worker.speculative:
             # The clone tells the person itself: one AI call and its wait saved.
             # Rimuru hears of it with its next turn, without spending one on this.
@@ -391,7 +423,8 @@ class WorkerPool:
             self.router.loop.note(
                 f'Task [{task.id}] "{task.title}" finished as {outcome}.\nworker: {worker.session.id}\n'
                 f"thread: {thread.id}\nfiles: {worker.where}/\n{summary}\n"
-                f"{look['name']} has already told the person: \"{for_person}\" - do not repeat it.")
+                f"{look['name']} has already told the person: \"{for_person}\" - do not repeat it."
+                + still_open)
             return
 
         if self.router and outcome in {"done", "failed"}:
@@ -416,8 +449,8 @@ class WorkerPool:
                 f"files: {worker.where}/\n"
                 + (f"{extra}\n" if extra else "") + "\n"
                 f"{summary}\n\n"
-                f"{summary}\n\n"
-                f"Tell whoever asked, in that channel's register.",
+                + (f"{still_open.strip()}\n\n" if still_open else "")
+                + "Tell whoever asked, in that channel's register.",
                 # Whoever asked is waiting to hear (speculative work may stay quiet).
                 waiting=None if worker.speculative else task.thread_id,
             )

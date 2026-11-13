@@ -27,6 +27,7 @@ from .ids import new_id
 from .models import (
     R_PASSTHROUGH,
     V_ACCEPTED,
+    Finding,
     Job,
     Memory,
     Session,
@@ -44,6 +45,7 @@ log = logging.getLogger("rimuru.store")
 
 # Raised whenever the tables change. A database from before is backed up first
 # (data/backups) and then brought up to date; one from after is refused.
+# A new table an older Rimuru simply ignores (findings) does not count.
 SCHEMA_VERSION = 1
 
 SCHEMA = """
@@ -76,6 +78,7 @@ CREATE TABLE IF NOT EXISTS chat (
 );
 CREATE TABLE IF NOT EXISTS contexts (session_id TEXT PRIMARY KEY, ts REAL, data TEXT);
 CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, ts REAL, data TEXT);
+CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, ts REAL, scope TEXT, data TEXT);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, topic TEXT, data TEXT);
 CREATE INDEX IF NOT EXISTS steps_session ON steps(session_id, idx);
 CREATE INDEX IF NOT EXISTS steps_ts ON steps(ts);
@@ -233,6 +236,8 @@ class Store:
         self.notes: list[dict[str, Any]] = []
         # Long-term memory (s8.1): what Rimuru remembers, read back to it each turn.
         self.memories: dict[str, Memory] = {}
+        # The session notebooks (rimuru/notebook.py): what clones found out, shared.
+        self.findings: dict[str, Finding] = {}
 
         # The person's conversation with Rimuru.
         self.chat: list[dict[str, Any]] = []
@@ -271,6 +276,9 @@ class Store:
         for d in rows("SELECT data FROM memories ORDER BY ts"):
             memory = from_dict(Memory, d)
             self.memories[memory.id] = memory
+        for d in rows("SELECT data FROM findings ORDER BY ts"):
+            finding = from_dict(Finding, d)
+            self.findings[finding.id] = finding
         if self.notes and not self.memories:
             # Notes were write-only: kept, never read back. They become memories once.
             for note in self.notes:
@@ -640,8 +648,10 @@ class Store:
         self._chat_by_key.pop(thread.key, None)
         memories = [m.id for m in self.memories.values()
                     if m.about == "session" and m.session_key == thread.key]
+        findings = [f.id for f in self.findings.values() if f.scope == thread_id]
         for ids, mirror in ((triggers, self.triggers), (tasks, self.tasks), (jobs, self.jobs),
-                            (memories, self.memories), (clones, self.sessions), (clones, self.steps)):
+                            (memories, self.memories), (findings, self.findings),
+                            (clones, self.sessions), (clones, self.steps)):
             for key in ids:
                 mirror.pop(key, None)
         self.chat[:] = [m for m in self.chat if m.get("chat") != thread.key]
@@ -654,6 +664,7 @@ class Store:
         self._delete("jobs", "id", jobs)
         self._delete("chat", "id", chat)
         self._delete("memories", "id", memories)
+        self._delete("findings", "id", findings)
         return {"messages": len(chat), "jobs": len(tasks), "clones": len(clones), "memories": len(memories)}
 
     # ------------------------------------------------------------------ #
@@ -674,6 +685,18 @@ class Store:
             if self.bus:
                 self.bus.emit("memory.changed", memory=memory.to_dict(), deleted=True)
         return memory
+
+    # ------------------------------------------------------------------ #
+    # the session notebooks (rimuru/notebook.py)
+    # ------------------------------------------------------------------ #
+    def put_finding(self, finding: Finding) -> Finding:
+        self.findings[finding.id] = finding
+        self._write("INSERT OR REPLACE INTO findings (id, ts, scope, data) VALUES (?,?,?,?)",
+                    (finding.id, finding.created_ts, finding.scope, json.dumps(finding.to_dict())))
+        return finding
+
+    def findings_of(self, scope: str) -> list[Finding]:
+        return sorted((f for f in self.findings.values() if f.scope == scope), key=lambda f: f.created_ts)
 
     # ------------------------------------------------------------------ #
     # live conversations: what a loop holds in mind right now, saved after every

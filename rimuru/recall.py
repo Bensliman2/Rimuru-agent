@@ -36,9 +36,26 @@ def recall(obj_id: str, store, *, full: bool = False, cap: int = 280) -> str:
         return _recall_task(obj_id, store, full=full, cap=cap)
     if kind == "job":
         return _recall_job(obj_id, store, full=full)
+    if kind == "finding":
+        return _recall_finding(obj_id, store)
 
     rendered = inline_object(obj_id, store, cap)
     return rendered or f'recall: nothing stored under "{obj_id}".'
+
+
+def _recall_finding(obj_id: str, store) -> str:
+    from . import notebook
+
+    f = store.findings.get(obj_id)
+    if f is None:
+        return f'recall: nothing stored under "{obj_id}".'
+    out = (f"finding {f.id} ({f.status}{', closed by ' + f.closed_by if f.closed_by else ''}) "
+           f"in thread {f.scope}, task {f.task_id}, worker {f.worker_id}\n{notebook.line(store, f).strip()}")
+    linked = [store.findings.get(f.other)] + [g for g in store.findings.values() if g.other == f.id]
+    for g in linked:
+        if g is not None:
+            out += f"\n  related ({g.status}): {notebook.line(store, g).strip()}"
+    return out
 
 
 def _recall_trigger(obj_id: str, store, *, full: bool, cap: int) -> str:

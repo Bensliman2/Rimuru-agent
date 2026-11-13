@@ -228,3 +228,25 @@ class Memory:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class Finding:
+    """One thing a clone found out, in its session's notebook (rimuru/notebook.py):
+    what it is about, what is true, and how the clone knows it."""
+
+    id: str
+    scope: str                    # the thread it belongs to: clones on the same thread share it
+    subject: str                  # the file, function or question it is about
+    claim: str
+    evidence: str = ""            # how it is known: a test, a command, the code
+    task_id: str = ""
+    worker_id: str = ""
+    relation: str = "new"         # new | confirms | contradicts | settles
+    other: str = ""               # the finding it confirms, contradicts or settles
+    status: str = "open"          # open | replaced (by its own author) | settled (by a checked one)
+    closed_by: str = ""
+    created_ts: float = field(default_factory=now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

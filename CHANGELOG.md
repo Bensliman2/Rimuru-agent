@@ -3,6 +3,22 @@
 What changed in each version. Versions follow [Semantic Versioning](https://semver.org);
 before 1.0, a minor version may change how things work, and this page says how.
 
+## [Unreleased]
+
+### Added
+
+- **The session notebook.** Clones working on the same session write what they find out
+  there, with how they know it (`note_finding`, `read_notebook`). The clones at work hear
+  of each new finding, new clones read the notebook in their brief, and `recall(fnd_...)`
+  reaches any finding. A clone must say whether a finding on a subject already covered
+  confirms, contradicts or settles it; settling needs evidence from a check. Rimuru and
+  the other clone are told of a contradiction, a clone with one still open is asked once
+  to keep both sides before it finishes, and Rimuru gets both sides with the result.
+
+### Fixed
+
+- A finished job's summary was given to Rimuru twice in the same message.
+
 ## [0.1.0] - 2026-11-11
 
 The first public version, free software under the GNU AGPL-3.0
